@@ -1,0 +1,9 @@
+# Godot 4+ editor cache/import data (regenerated automatically, machine-specific)
+.godot/
+
+# Claude Code local session settings (not part of the game)
+.claude/
+
+# OS cruft
+.DS_Store
+Thumbs.db
