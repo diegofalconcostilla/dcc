@@ -1,22 +1,12 @@
 extends CanvasLayer
 class_name GameHud
 
-signal upgrade_chosen(upgrade_id: String)
-
-const UPGRADE_CHOICES := [
-	{"id": "damage", "label": "+25% Damage"},
-	{"id": "speed", "label": "+15% Attack Speed"},
-	{"id": "range", "label": "+20% Range"},
-	{"id": "max_hp", "label": "+20 Max HP"},
-]
-
 var hp_bar: ProgressBar
 var xp_bar: ProgressBar
 var timer_label: Label
 var floor_label: Label
 var points_label: Label
 var level_label: Label
-var choice_panel: Control
 var toast_label: Label
 var _toast_timer := 0.0
 
@@ -69,42 +59,11 @@ func _ready() -> void:
 	toast_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	add_child(toast_label)
 
-	_build_choice_panel()
-
 func _process(delta: float) -> void:
 	if _toast_timer > 0.0:
 		_toast_timer -= delta
 		if _toast_timer <= 0.0:
 			toast_label.visible = false
-
-func _build_choice_panel() -> void:
-	choice_panel = PanelContainer.new()
-	choice_panel.set_anchors_preset(Control.PRESET_CENTER)
-	choice_panel.visible = false
-	add_child(choice_panel)
-
-	var vbox := VBoxContainer.new()
-	choice_panel.add_child(vbox)
-
-	var title := Label.new()
-	title.text = "Level Up! Choose an upgrade:"
-	vbox.add_child(title)
-
-	for choice in UPGRADE_CHOICES:
-		var button := Button.new()
-		button.text = choice["label"]
-		button.pressed.connect(_on_choice_pressed.bind(choice["id"]))
-		vbox.add_child(button)
-
-func _on_choice_pressed(upgrade_id: String) -> void:
-	choice_panel.visible = false
-	get_tree().paused = false
-	upgrade_chosen.emit(upgrade_id)
-
-func show_level_up_choice() -> void:
-	get_tree().paused = true
-	choice_panel.process_mode = Node.PROCESS_MODE_ALWAYS
-	choice_panel.visible = true
 
 func update_floor(current_floor: int, max_floor: int) -> void:
 	floor_label.text = "Floor %d / %d" % [current_floor, max_floor]

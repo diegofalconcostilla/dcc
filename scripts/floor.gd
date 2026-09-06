@@ -47,11 +47,6 @@ func _process(delta: float) -> void:
 	if time_remaining <= 0.0:
 		_end_floor("cleared")
 
-func _unhandled_key_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.physical_keycode == KEY_TAB and player and floor_active:
-			player.switch_form()
-
 func _spawn_player() -> void:
 	player = Player.new()
 	player.add_to_group("player")
@@ -70,7 +65,6 @@ func _spawn_player() -> void:
 func _spawn_hud() -> void:
 	hud = GameHud.new()
 	add_child(hud)
-	hud.upgrade_chosen.connect(_on_upgrade_chosen)
 	hud.update_hp(player.hp, player.max_hp)
 	hud.update_xp(player.xp, player.xp_to_next)
 	hud.update_level(player.level)
@@ -82,6 +76,8 @@ func _spawn_enemy_spawner() -> void:
 	spawner.floor_speed_multiplier = 1.0 + float(current_floor - 1) * FLOOR_SPEED_STEP
 	add_child(spawner)
 	spawner.enemy_died.connect(_on_enemy_died)
+	spawner.boss_spawned.connect(_on_boss_spawned)
+	spawner.boss_died.connect(_on_boss_died)
 
 func _on_player_hp_changed(current: float, max_hp: float) -> void:
 	hud.update_hp(current, max_hp)
@@ -91,15 +87,19 @@ func _on_player_xp_changed(current: float, needed: float) -> void:
 
 func _on_player_leveled_up(level: int) -> void:
 	hud.update_level(level)
-	hud.show_level_up_choice()
-
-func _on_upgrade_chosen(upgrade_id: String) -> void:
-	player.apply_upgrade(upgrade_id)
+	player.apply_level_up_bonus()
 
 func _on_enemy_died(point_value: int, _death_position: Vector2) -> void:
 	total_points += point_value
 	floor_points += point_value
 	hud.update_points(total_points)
+
+func _on_boss_spawned() -> void:
+	hud.show_toast("A boss has appeared!")
+
+func _on_boss_died(point_value: int, death_position: Vector2) -> void:
+	hud.show_toast("Boss defeated! +%d points" % point_value)
+	_on_enemy_died(point_value, death_position)
 
 func register_damage_taken(amount: float) -> void:
 	floor_damage_taken += amount
@@ -129,6 +129,9 @@ func _end_floor(outcome: String) -> void:
 		"outcome": outcome,
 		"points": floor_points,
 		"damage_taken": floor_damage_taken,
+		"distance_moved": player.floor_distance_moved,
+		"bombs_thrown": player.floor_bombs_thrown,
+		"missiles_cast": player.floor_missiles_cast,
 	})
 	if achievement != null:
 		await get_tree().create_timer(3.5).timeout
@@ -153,6 +156,7 @@ func _start_next_floor() -> void:
 	floor_points = 0
 	floor_damage_taken = 0.0
 	time_remaining = floor_duration
+	player.reset_floor_stats()
 
 	for node in get_tree().get_nodes_in_group("enemies"):
 		node.queue_free()

@@ -3,8 +3,7 @@ class_name Enemy
 
 signal died(point_value: int, death_position: Vector2)
 
-const RADIUS := 12.0
-
+var radius := 12.0
 var speed := 70.0
 var hp := 20.0
 var max_hp := 20.0
@@ -18,7 +17,7 @@ func _ready() -> void:
 	add_to_group("enemies")
 	var shape := CollisionShape2D.new()
 	var circle := CircleShape2D.new()
-	circle.radius = RADIUS
+	circle.radius = radius
 	shape.shape = circle
 	add_child(shape)
 
@@ -30,7 +29,7 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		if _contact_cooldown > 0.0:
 			_contact_cooldown -= delta
-		elif global_position.distance_to(player.global_position) <= RADIUS + 16.0:
+		elif global_position.distance_to(player.global_position) <= radius + 16.0:
 			if player.has_method("take_damage"):
 				player.take_damage(contact_damage)
 				_contact_cooldown = 0.5
@@ -41,7 +40,7 @@ func _physics_process(delta: float) -> void:
 
 func _draw() -> void:
 	var t: float = hp / max_hp
-	draw_circle(Vector2.ZERO, RADIUS, Color(0.8, 0.2 + 0.4 * (1.0 - t), 0.2))
+	draw_circle(Vector2.ZERO, radius, Color(0.8, 0.2 + 0.4 * (1.0 - t), 0.2))
 
 func take_damage(amount: float) -> void:
 	hp -= amount

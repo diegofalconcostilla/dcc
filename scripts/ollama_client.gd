@@ -17,19 +17,40 @@ const DEFAULT_TIMEOUT_SEC := 6.0
 func get_loot(tier: String, context: Dictionary) -> Dictionary:
 	var prompt := _build_loot_prompt(tier, context)
 	var raw: Variant = await _request_json(prompt, DEFAULT_TIMEOUT_SEC)
+	var result: Dictionary
+	var source: String
 	if raw != null:
 		var validated := LootGenerator.validate_and_clamp(raw, tier)
 		if not validated.is_empty():
 			print("[OllamaClient] loot: LLM-generated (tier=%s)" % tier)
-			return validated
-		print("[OllamaClient] loot: LLM response failed validation, using fallback")
+			result = validated
+			source = "llm"
+		else:
+			print("[OllamaClient] loot: LLM response failed validation, using fallback")
+			result = LootGenerator.generate_loot(tier, context)
+			source = "fallback_invalid"
 	else:
 		print("[OllamaClient] loot: no/invalid response, using fallback")
-	return LootGenerator.generate_loot(tier, context)
+		result = LootGenerator.generate_loot(tier, context)
+		source = "fallback_no_response"
+
+	ContentLogger.log_event({
+		"kind": "loot",
+		"tier": tier,
+		"context": context,
+		"prompt": prompt,
+		"raw_response": raw,
+		"source": source,
+		"result": result,
+	})
+	return result
 
 func get_achievement(context: Dictionary) -> Variant:
 	var prompt := _build_achievement_prompt(context)
 	var raw: Variant = await _request_json(prompt, DEFAULT_TIMEOUT_SEC)
+	var result: Variant = null
+	var source: String
+
 	if raw != null and typeof(raw) == TYPE_DICTIONARY:
 		if raw.get("earned", false) == true and typeof(raw.get("achievement")) == TYPE_DICTIONARY:
 			var ach: Dictionary = raw["achievement"]
@@ -37,11 +58,26 @@ func get_achievement(context: Dictionary) -> Variant:
 			var description: String = str(ach.get("description", "")).left(160).strip_edges()
 			if title != "" and description != "":
 				print("[OllamaClient] achievement: LLM-generated")
-				return {"title": title, "description": description, "tone": str(ach.get("tone", "comedic"))}
-		print("[OllamaClient] achievement: LLM says none earned (or malformed earned=true)")
-		return null
-	print("[OllamaClient] achievement: no/invalid response, using local fallback rules")
-	return AchievementGenerator.generate(context)
+				result = {"title": title, "description": description, "tone": str(ach.get("tone", "comedic"))}
+		if result == null:
+			print("[OllamaClient] achievement: LLM says none earned (or malformed earned=true)")
+			source = "llm_malformed" if raw.get("earned", false) == true else "llm_no_award"
+		else:
+			source = "llm"
+	else:
+		print("[OllamaClient] achievement: no/invalid response, using local fallback rules")
+		result = AchievementGenerator.generate(context)
+		source = "fallback_no_response"
+
+	ContentLogger.log_event({
+		"kind": "achievement",
+		"context": context,
+		"prompt": prompt,
+		"raw_response": raw,
+		"source": source,
+		"result": result,
+	})
+	return result
 
 func _build_loot_prompt(tier: String, context: Dictionary) -> String:
 	var floor_num: int = context.get("floor", 1)
@@ -71,12 +107,16 @@ func _build_achievement_prompt(context: Dictionary) -> String:
 	var outcome: String = context.get("outcome", "")
 	var points: int = context.get("points", 0)
 	var damage: float = context.get("damage_taken", 0.0)
+	var distance: float = context.get("distance_moved", 0.0)
+	var bombs: int = context.get("bombs_thrown", 0)
+	var missiles: int = context.get("missiles_cast", 0)
 
 	var lines := PackedStringArray([
 		"You are an achievement generator for a dark-comedy sci-fi dungeon-crawler game (Dungeon Crawler Carl-inspired), styled like a snarky reality-show announcer.",
 		"A player just finished floor %d, outcome \"%s\", with %d points and %d damage taken." % [floor_num, outcome, points, int(damage)],
+		"Movement/ability stats for this floor: moved %d px total, threw %d bombs (area damage), cast %d magic missiles (single-target)." % [int(distance), bombs, missiles],
 		"",
-		"Decide if this run deserves a special achievement. Be selective: most runs should NOT get one — only for something notably good, notably bad, or funny.",
+		"Decide if this run deserves a special achievement. Be selective: most runs should NOT get one — only for something notably good, notably bad, or funny. Feel free to call out a distinctive playstyle from the movement/ability stats: barely moving, kiting constantly, spamming one ability, never using an ability, etc.",
 		"",
 		"Respond with ONLY a JSON object, no other text, matching exactly this shape:",
 		"{\"earned\": boolean, \"achievement\": {\"title\": string (<=60 chars), \"description\": string (<=160 chars), \"tone\": \"heroic\"|\"comedic\"|\"grim\"} or null}",

@@ -115,6 +115,48 @@ Confirmed with real Ollama calls (model: `llama3.2:latest`, `DCC_FLOOR_DURATION=
 - **Testing hook:** `floor.gd` reads env var `DCC_FLOOR_DURATION` (e.g. `DCC_FLOOR_DURATION=3`) to shorten floors from the real 90s for quickly exercising the floor-clear → LLM-call → log flow.
 - **Still open:** exact power-budget numbers/stat ranges per tier are the original placeholders, untuned; the point/damage-taken → tier formula is likewise still a placeholder.
 
+## Long-term direction: full RPG driven by player-behavior AI
+
+**Vision (stated 2026-09-06):** the loot/achievement LLM integration is the first step toward a larger goal — evolving DCC into an RPG where the LLM's decisions (loot, achievements, and eventually dialogue/narrative/difficulty) are shaped by the player's *entire* behavioral history (movement patterns, ability usage, risk-taking, decisions made), not just the current floor's raw stats.
+
+**Feasibility constraint driving the design:** the LLM backend is a local model (`llama3.2:latest`, 6s call timeout, gameplay must never block on it — see "AI content integration design" above). Raw event streams (every position sample, every input) are far too large to hand the model directly — this must be solved with layering, not brute force.
+
+**Chosen architecture — two layers, kept deliberately separate:**
+
+1. **Raw event log (local-only, full fidelity).** Extend the existing `ContentLogger` JSONL-append pattern (currently used for loot/achievement decisions, see `scripts/content_logger.gd`) to also record movement/ability events. This never gets sent to the LLM directly — it's for later offline analysis and as future curator-agent input.
+2. **Code-side numeric aggregation (cheap, deterministic, already partly built).** `Player` tracks running per-floor totals — `floor_distance_moved`, `floor_bombs_thrown`, `floor_missiles_cast` — reset each floor via `reset_floor_stats()`, fed into the achievement prompt as plain numbers. This stays as-is; a sum or average is not something worth spending an LLM call on.
+
+**New third layer — a "curator" LLM pass (periodic, narrative-focused):** where option 2 falls short is qualitative/narrative synthesis — condensing accumulated free text (past loot flavor text, past achievement titles/descriptions) plus this window's numeric aggregates into a running "character profile" that then feeds into *future* loot/achievement calls (and later, dialogue/difficulty decisions), keeping the AI's output consistent with the player's established playstyle and story-so-far.
+
+Key design constraint: **the curator profile must replace itself each cycle, not append.** It has to stay a fixed size regardless of how many floors have passed (floor 2's profile and floor 9's profile must cost the same tokens), or "lightweight" breaks down over a long run. Each curation call takes {previous profile + this window's raw events/aggregates} and produces a new profile of the same shape — never a growing list.
+
+Should run **every N floors, not every floor** — stacking a third sequential local-model call onto the existing loot+achievement pair at every single floor-end risks compounding latency (each call can cost ~4-5s cold). Exact N still open.
+
+**Drafted curator output schema (not yet implemented):**
+```json
+{
+  "playstyle_tags": ["kiter", "bomb_reliant"],
+  "risk_profile": "cautious",
+  "dominant_ability": "bomb",
+  "combat_style_summary": "Hangs back and lets bombs do the work, rarely engages directly.",
+  "narrative_arc": "Once reckless, now visibly gun-shy after the floor-3 boss nearly ended the run.",
+  "notable_moments": [
+    "Cleared floor 4 without taking a hit",
+    "Nearly died to the first boss"
+  ],
+  "tone": "grim"
+}
+```
+- `playstyle_tags`: 0-3 short enum-like tags.
+- `risk_profile`: enum `reckless | balanced | cautious`, derived from damage-taken/points ratio.
+- `dominant_ability`: enum `bomb | missile | auto_attack | balanced`.
+- `combat_style_summary`: <=140 chars, one line.
+- `narrative_arc`: <=200 chars, the running "character legend" carried forward each cycle.
+- `notable_moments`: 0-3 entries, <=80 chars each — bounded, so old moments are expected to silently drop off as new ones crowd them out (completeness traded for fixed size, same tradeoff as the profile as a whole).
+- `tone`: enum `heroic | comedic | grim | chaotic`, kept for consistency with future loot/achievement flavor text.
+
+All fields need the same client-side validation discipline as loot/achievements already have (`LootGenerator.validate_and_clamp`, achievement title/description clamps in `ollama_client.gd`) — bounded enums and length-clamped strings, never trusting raw model output. **Not yet implemented** — this is a design sketch pending: the every-N-floors cadence, where the profile is stored (likely alongside `floor_points`/`floor_damage_taken` on `floor.gd`, or a small dedicated resource), and the curator's own prompt/request shape.
+
 ## Open questions / next steps
 
 - [x] First playable slice built — single floor, 90s survive-the-timer loop (`scenes/Floor.tscn` + `scripts/`): free movement, auto-attack nearest enemy, ramping enemy spawner, contact damage, XP pickups + level-up choice screen, floor ends on timer expiry or player death, `LootGenerator`/`AchievementGenerator` wired with local fallback content (Ollama call is the next step, not yet connected — see AI integration section). Verified error-free via headless run (`godot --headless --path . --quit-after N`) and confirmed rendering visually (screenshot of the running game window).
@@ -128,6 +170,7 @@ Confirmed with real Ollama calls (model: `llama3.2:latest`, `DCC_FLOOR_DURATION=
 - [x] Reality-show meta layer — deprioritized, out of scope for now
 - [x] AI content-generation request/response shape for loot-box content + achievements — see "AI content integration design" section above; remaining implementation-level TBDs (tier formula, stat ranges, model choice, timeout) listed there
 - [ ] Start Ollama and pick/pull a local model to use for this experiment
+- [ ] Implement the "curator" LLM pass described above — decide the every-N-floors cadence, where the profile is stored, and wire its output into future loot/achievement prompts
 - [ ] Read further into the books for more concrete material (floor themes, specific enemies/items) to draw from
 
 ## Reference
