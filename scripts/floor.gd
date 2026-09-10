@@ -19,6 +19,13 @@ var floor_points := 0
 var floor_damage_taken := 0.0
 var floor_active := true
 
+# Running "curator" character profile — see plan.md's "Long-term direction"
+# section. Fixed-shape, replaced (not appended to) twice per floor: once at
+# the timer's halfway point, once at floor-end.
+var character_profile := CuratorGenerator.DEFAULT_PROFILE.duplicate(true)
+var _mid_floor_curator_done := false
+var _curator_busy := false
+
 func _ready() -> void:
 	floor_duration = _resolve_floor_duration()
 	time_remaining = floor_duration
@@ -44,8 +51,43 @@ func _process(delta: float) -> void:
 		return
 	time_remaining = max(0.0, time_remaining - delta)
 	hud.update_timer(time_remaining)
+	if not _mid_floor_curator_done and time_remaining <= floor_duration / 2.0:
+		_mid_floor_curator_done = true
+		_run_mid_floor_curator()
 	if time_remaining <= 0.0:
 		_end_floor("cleared")
+
+## Fire-and-forget: awaits the Ollama call internally without blocking
+## _process (GDScript coroutines yield at their first `await` and resume
+## later on their own). Guarded by _mid_floor_curator_done so it only fires
+## once per floor.
+func _run_mid_floor_curator() -> void:
+	_curator_busy = true
+	character_profile = await ollama.get_curator_update({
+		"floor": current_floor,
+		"phase": "mid_floor",
+		"points_this_floor": floor_points,
+		"damage_taken_this_floor": floor_damage_taken,
+		"distance_moved": player.floor_distance_moved,
+		"bombs_thrown": player.floor_bombs_thrown,
+		"missiles_cast": player.floor_missiles_cast,
+	}, character_profile)
+	_curator_busy = false
+	await _apply_curator_profile()
+
+## Hands the System AI's latest tactical numbers to the live spawner and, if
+## it left a taunt, shows it to the player. Called after every curator_update
+## resolves (mid-floor, floor-end, and once right after a fresh spawner is
+## created so a new floor doesn't silently reset to a neutral tactic).
+func _apply_curator_profile() -> void:
+	if spawner:
+		spawner.apply_profile(character_profile)
+	var commentary: String = character_profile.get("ai_commentary", "")
+	if commentary != "":
+		hud.show_toast("System AI: %s" % commentary)
+		# Give the taunt a moment on screen before anything else can overwrite
+		# it (floor-end otherwise moves straight into the next floor's toast).
+		await get_tree().create_timer(2.5).timeout
 
 func _spawn_player() -> void:
 	player = Player.new()
@@ -78,6 +120,7 @@ func _spawn_enemy_spawner() -> void:
 	spawner.enemy_died.connect(_on_enemy_died)
 	spawner.boss_spawned.connect(_on_boss_spawned)
 	spawner.boss_died.connect(_on_boss_died)
+	spawner.apply_profile(character_profile)  # carry the System AI's current tactic into the new floor
 
 func _on_player_hp_changed(current: float, max_hp: float) -> void:
 	hud.update_hp(current, max_hp)
@@ -113,18 +156,11 @@ func _end_floor(outcome: String) -> void:
 	floor_active = false
 	get_tree().paused = true
 
-	var tier := LootGenerator.compute_tier(floor_points, floor_damage_taken)
-	hud.show_toast("Floor %d %s! Opening [%s] loot box..." % [current_floor, outcome, tier.to_upper()])
-	var loot: Dictionary = await ollama.get_loot(tier, {
-		"floor": current_floor,
-		"points_this_floor": floor_points,
-		"damage_taken_this_floor": floor_damage_taken,
-	})
-	player.apply_loot(loot)
-	hud.show_toast("Floor %d %s! Loot: [%s] %s — %s" % [current_floor, outcome, tier.to_upper(), loot["name"], loot["flavor_text"]])
-	print("Floor %d ended: outcome=%s tier=%s loot=%s" % [current_floor, outcome, tier, loot])
-
-	var achievement = await ollama.get_achievement({
+	# Loot is now achievement-gated: no achievement, no loot box. This is
+	# decided before loot generation, on purpose, so the loot call (when it
+	# happens) can reference the achievement and generate something thematically
+	# tied to it, rather than the two being generated independently.
+	var floor_end_context := {
 		"floor": current_floor,
 		"outcome": outcome,
 		"points": floor_points,
@@ -132,14 +168,48 @@ func _end_floor(outcome: String) -> void:
 		"distance_moved": player.floor_distance_moved,
 		"bombs_thrown": player.floor_bombs_thrown,
 		"missiles_cast": player.floor_missiles_cast,
-	})
+	}
+	var achievement = await ollama.get_achievement(floor_end_context, character_profile)
 	if achievement != null:
 		await get_tree().create_timer(3.5).timeout
 		hud.show_toast("Achievement unlocked: %s — %s" % [achievement["title"], achievement["description"]])
 		print("Achievement: %s" % achievement)
 		await get_tree().create_timer(3.5).timeout
-	else:
+
+		var tier := LootGenerator.compute_tier(floor_points, floor_damage_taken)
+		hud.show_toast("Opening [%s] loot box..." % tier.to_upper())
+		var loot: Dictionary = await ollama.get_loot(tier, {
+			"floor": current_floor,
+			"points_this_floor": floor_points,
+			"damage_taken_this_floor": floor_damage_taken,
+		}, character_profile, achievement)
+		player.apply_loot(loot)
+		hud.show_toast("Loot: [%s] %s — %s" % [tier.to_upper(), loot["name"], loot["flavor_text"]])
+		print("Floor %d ended: outcome=%s tier=%s loot=%s achievement=%s" % [current_floor, outcome, tier, loot, achievement["title"]])
 		await get_tree().create_timer(3.0).timeout
+	else:
+		hud.show_toast("Floor %d %s. No achievement this time — no loot." % [current_floor, outcome])
+		print("Floor %d ended: outcome=%s, no achievement, no loot" % [current_floor, outcome])
+		await get_tree().create_timer(2.0).timeout
+
+	# If the mid-floor call is still in flight (e.g. a cold Ollama load outlasting
+	# a short DCC_FLOOR_DURATION test floor), wait for it so its result can't
+	# land after — and clobber — this floor-end update.
+	while _curator_busy:
+		await get_tree().process_frame
+	_curator_busy = true
+	character_profile = await ollama.get_curator_update({
+		"floor": current_floor,
+		"phase": "floor_end",
+		"outcome": outcome,
+		"points_this_floor": floor_points,
+		"damage_taken_this_floor": floor_damage_taken,
+		"distance_moved": player.floor_distance_moved,
+		"bombs_thrown": player.floor_bombs_thrown,
+		"missiles_cast": player.floor_missiles_cast,
+	}, character_profile)
+	_curator_busy = false
+	await _apply_curator_profile()
 
 	if outcome == "cleared" and current_floor < MAX_FLOOR:
 		_start_next_floor()
@@ -156,11 +226,16 @@ func _start_next_floor() -> void:
 	floor_points = 0
 	floor_damage_taken = 0.0
 	time_remaining = floor_duration
+	_mid_floor_curator_done = false
 	player.reset_floor_stats()
 
 	for node in get_tree().get_nodes_in_group("enemies"):
 		node.queue_free()
 	for node in get_tree().get_nodes_in_group("pickups"):
+		node.queue_free()
+	for node in get_tree().get_nodes_in_group("bombs"):
+		node.queue_free()
+	for node in get_tree().get_nodes_in_group("lasers"):
 		node.queue_free()
 	spawner.queue_free()
 	_spawn_enemy_spawner()

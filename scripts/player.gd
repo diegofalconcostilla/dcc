@@ -13,9 +13,12 @@ const BASE_ATTACK_COOLDOWN := 0.6
 const BASE_ATTACK_RANGE := 140.0
 const MIN_COOLDOWN := 0.08
 
-# Left-click: bomb thrown at the cursor, damaging everything within its
-# radius on impact. Right-click: magic missile, a single-target hit fired
-# toward the cursor. Both placeholders pending playtesting.
+# Left-click: bomb thrown at the cursor, landing instantly but not exploding
+# until its fuse runs out (see Bomb) — damages everything within its radius.
+# Right-click: a laser bolt fired toward the cursor as an actual traveling
+# projectile (see Laser), not an instant hit. Both telegraphed on purpose so
+# enemies get a chance to dodge (see Enemy.try_dodge_point/try_dodge_line) —
+# placeholders pending playtesting.
 const BOMB_COOLDOWN := 1.2
 const BOMB_RADIUS := 60.0
 const BOMB_DAMAGE := 20.0
@@ -24,7 +27,6 @@ const BOMB_MAX_RANGE := 220.0
 const MISSILE_COOLDOWN := 0.5
 const MISSILE_DAMAGE := 12.0
 const MISSILE_RANGE := 260.0
-const MISSILE_HALF_WIDTH := 24.0  # perpendicular tolerance for "closest enemy along the aim line"
 
 # Flat per-level stat bumps applied automatically on level-up (no player
 # choice — see apply_level_up_bonus). Placeholder values pending playtesting.
@@ -63,10 +65,6 @@ var _missile_timer := 0.0
 var _damage_flash := 0.0
 var _attack_flash_target := Vector2.ZERO
 var _attack_flash_timer := 0.0
-var _bomb_flash_position := Vector2.ZERO
-var _bomb_flash_timer := 0.0
-var _missile_flash_target := Vector2.ZERO
-var _missile_flash_timer := 0.0
 
 func _ready() -> void:
 	var shape := CollisionShape2D.new()
@@ -85,10 +83,6 @@ func _physics_process(delta: float) -> void:
 		_damage_flash -= delta
 	if _attack_flash_timer > 0.0:
 		_attack_flash_timer -= delta
-	if _bomb_flash_timer > 0.0:
-		_bomb_flash_timer -= delta
-	if _missile_flash_timer > 0.0:
-		_missile_flash_timer -= delta
 	queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -138,46 +132,50 @@ func _find_nearest_enemy() -> Node2D:
 			nearest_dist = dist
 	return nearest
 
-## Left-click ability: explodes at the cursor (clamped to BOMB_MAX_RANGE),
-## damaging every enemy within BOMB_RADIUS of the impact point.
+## Left-click ability: throws a bomb at the cursor (clamped to BOMB_MAX_RANGE)
+## that lands instantly but doesn't explode until its fuse runs out (see
+## Bomb) — the delay is what gives enemies a window to dodge.
 func _throw_bomb() -> void:
 	if _bomb_timer > 0.0:
 		return
 	_bomb_timer = BOMB_COOLDOWN
 	floor_bombs_thrown += 1
 	var impact := _clamp_to_range(get_global_mouse_position(), BOMB_MAX_RANGE)
-	for enemy in get_tree().get_nodes_in_group("enemies"):
-		if impact.distance_to(enemy.global_position) <= BOMB_RADIUS and enemy.has_method("take_damage"):
-			enemy.take_damage(BOMB_DAMAGE)
-	_bomb_flash_position = to_local(impact)
-	_bomb_flash_timer = 0.2
+	var bomb := Bomb.new()
+	bomb.global_position = impact
+	bomb.damage = BOMB_DAMAGE
+	bomb.radius = BOMB_RADIUS
+	bomb.dodge_chance = _get_character_profile().get("bomb_dodge_chance", 0.0)
+	get_parent().add_child(bomb)
 
-## Right-click ability: hits the closest enemy lying along the line from the
-## player to the cursor (within MISSILE_RANGE and MISSILE_HALF_WIDTH of it).
+## Right-click ability: fires a laser bolt toward the cursor as an actual
+## traveling projectile (see Laser), not an instant hit — so enemies in its
+## path get a chance to dodge before it reaches them.
 func _cast_missile() -> void:
 	if _missile_timer > 0.0:
 		return
 	var aim_dir := (get_global_mouse_position() - global_position).normalized()
 	if aim_dir == Vector2.ZERO:
 		return
-	var target: Node2D = null
-	var target_projection := MISSILE_RANGE
-	for enemy in get_tree().get_nodes_in_group("enemies"):
-		var to_enemy: Vector2 = enemy.global_position - global_position
-		var projection := to_enemy.dot(aim_dir)
-		if projection < 0.0 or projection > target_projection:
-			continue
-		var perpendicular := (to_enemy - aim_dir * projection).length()
-		if perpendicular <= MISSILE_HALF_WIDTH:
-			target = enemy
-			target_projection = projection
-	if target == null:
-		return
 	_missile_timer = MISSILE_COOLDOWN
 	floor_missiles_cast += 1
-	target.take_damage(MISSILE_DAMAGE)
-	_missile_flash_target = to_local(target.global_position)
-	_missile_flash_timer = 0.15
+	var laser := Laser.new()
+	laser.global_position = global_position
+	laser.direction = aim_dir
+	laser.damage = MISSILE_DAMAGE
+	laser.max_range = MISSILE_RANGE
+	laser.dodge_chance = _get_character_profile().get("missile_dodge_chance", 0.0)
+	get_parent().add_child(laser)
+
+## The System AI's current read on the player, kept on the floor controller
+## (see floor.gd's character_profile) — dodge chances come straight from its
+## bomb_dodge_chance/missile_dodge_chance fields. Never computed locally;
+## this is just where Player looks it up. {} (all defaults) if unavailable.
+func _get_character_profile() -> Dictionary:
+	var floor_node := get_tree().get_first_node_in_group("floor_controller")
+	if floor_node and "character_profile" in floor_node:
+		return floor_node.character_profile
+	return {}
 
 func _clamp_to_range(world_pos: Vector2, max_range: float) -> Vector2:
 	var offset := world_pos - global_position
@@ -192,10 +190,6 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, RADIUS, color)
 	if _attack_flash_timer > 0.0:
 		draw_line(Vector2.ZERO, _attack_flash_target, Color(1, 1, 0, 0.6), 2.0)
-	if _bomb_flash_timer > 0.0:
-		draw_circle(_bomb_flash_position, BOMB_RADIUS, Color(1, 0.4, 0.1, 0.35))
-	if _missile_flash_timer > 0.0:
-		draw_line(Vector2.ZERO, _missile_flash_target, Color(0.4, 0.7, 1, 0.8), 3.0)
 
 func take_damage(amount: float) -> void:
 	hp -= amount

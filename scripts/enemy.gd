@@ -11,7 +11,13 @@ var contact_damage := 8.0
 var xp_value := 3.0
 var point_value := 10
 
+const DODGE_DURATION := 0.35
+const DODGE_SPEED_MULTIPLIER := 1.4
+const DODGE_LINE_TOLERANCE := 60.0  # how close to a laser's path counts as "in danger"
+
 var _contact_cooldown := 0.0
+var _dodge_timer := 0.0
+var _dodge_dir := Vector2.ZERO
 
 func _ready() -> void:
 	add_to_group("enemies")
@@ -24,8 +30,15 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	var player := get_tree().get_first_node_in_group("player")
 	if player:
-		var dir: Vector2 = (player.global_position - global_position).normalized()
-		velocity = dir * speed
+		var dir: Vector2
+		var move_speed := speed
+		if _dodge_timer > 0.0:
+			_dodge_timer -= delta
+			dir = _dodge_dir
+			move_speed *= DODGE_SPEED_MULTIPLIER
+		else:
+			dir = (player.global_position - global_position).normalized()
+		velocity = dir * move_speed
 		move_and_slide()
 		if _contact_cooldown > 0.0:
 			_contact_cooldown -= delta
@@ -53,3 +66,41 @@ func scale_difficulty(factor: float) -> void:
 	max_hp = hp
 	speed *= min(factor, 1.3)
 	contact_damage *= factor
+
+## Called by a just-landed Bomb on every enemy in its blast range + margin.
+## Rolls `chance` (see the System AI's bomb_dodge_chance, floor.gd's
+## character_profile) and, on success, flees radially away from the bomb for
+## `duration` — Bomb passes its own fuse length here, not DODGE_DURATION,
+## since a fixed short dodge used to end well before the bomb actually went
+## off, letting enemies wander right back into the blast on their way back
+## to chasing the player.
+func try_dodge_point(from: Vector2, chance: float, duration: float = DODGE_DURATION) -> void:
+	if _dodge_timer > 0.0 or randf() >= chance:
+		return
+	_dodge_dir = (global_position - from).normalized()
+	if _dodge_dir == Vector2.ZERO:
+		_dodge_dir = Vector2.RIGHT.rotated(randf() * TAU)
+	_dodge_timer = duration
+
+## Called by a just-fired Laser on every enemy, regardless of position — cheap
+## to check and the laser is already gone by the time a far-away enemy would
+## matter. Rolls `chance` (see the System AI's missile_dodge_chance) only if
+## this enemy is actually near the laser's path, and on success sidesteps
+## perpendicular to it for DODGE_DURATION — a fixed short window is fine here
+## since the projectile passes in a fraction of a second either way.
+func try_dodge_line(origin: Vector2, dir: Vector2, max_range: float, chance: float) -> void:
+	if _dodge_timer > 0.0:
+		return
+	var to_enemy := global_position - origin
+	var projection := to_enemy.dot(dir)
+	if projection < 0.0 or projection > max_range:
+		return
+	var perpendicular := to_enemy - dir * projection
+	if perpendicular.length() > DODGE_LINE_TOLERANCE:
+		return
+	if randf() >= chance:
+		return
+	_dodge_dir = perpendicular.normalized()
+	if _dodge_dir == Vector2.ZERO:
+		_dodge_dir = dir.rotated(PI / 2.0)
+	_dodge_timer = DODGE_DURATION

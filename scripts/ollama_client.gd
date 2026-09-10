@@ -14,8 +14,11 @@ const MODEL := "llama3.2:latest"
 # fair shot without risking a real stall.
 const DEFAULT_TIMEOUT_SEC := 6.0
 
-func get_loot(tier: String, context: Dictionary) -> Dictionary:
-	var prompt := _build_loot_prompt(tier, context)
+## `achievement` (optional): {"title", "description", "tone"} — when given, the
+## loot is generated to thematically tie into it (loot is now achievement-
+## gated; see floor.gd's _end_floor, which only calls this when one was earned).
+func get_loot(tier: String, context: Dictionary, profile: Dictionary = {}, achievement: Variant = null) -> Dictionary:
+	var prompt := _build_loot_prompt(tier, context, profile, achievement)
 	var raw: Variant = await _request_json(prompt, DEFAULT_TIMEOUT_SEC)
 	var result: Dictionary
 	var source: String
@@ -45,8 +48,8 @@ func get_loot(tier: String, context: Dictionary) -> Dictionary:
 	})
 	return result
 
-func get_achievement(context: Dictionary) -> Variant:
-	var prompt := _build_achievement_prompt(context)
+func get_achievement(context: Dictionary, profile: Dictionary = {}) -> Variant:
+	var prompt := _build_achievement_prompt(context, profile)
 	var raw: Variant = await _request_json(prompt, DEFAULT_TIMEOUT_SEC)
 	var result: Variant = null
 	var source: String
@@ -79,7 +82,44 @@ func get_achievement(context: Dictionary) -> Variant:
 	})
 	return result
 
-func _build_loot_prompt(tier: String, context: Dictionary) -> String:
+## Twice-per-floor (mid-floor + floor-end) "curator" pass: folds this window's
+## aggregates into the previous profile and returns a fresh, same-shape
+## profile. Never blocks gameplay longer than the shared timeout; on any
+## failure the previous profile is kept as-is (there's no "fallback content"
+## for a running character profile the way loot/achievements have one).
+func get_curator_update(context: Dictionary, previous_profile: Dictionary) -> Dictionary:
+	var prompt := _build_curator_prompt(context, previous_profile)
+	var raw: Variant = await _request_json(prompt, DEFAULT_TIMEOUT_SEC)
+	var result: Dictionary
+	var source: String
+
+	if raw != null:
+		var validated := CuratorGenerator.validate_and_clamp(raw)
+		if not validated.is_empty():
+			print("[OllamaClient] curator: profile updated (phase=%s)" % context.get("phase", "?"))
+			result = validated
+			source = "llm"
+		else:
+			print("[OllamaClient] curator: LLM response failed validation, keeping previous profile")
+			result = previous_profile.duplicate(true)
+			source = "fallback_invalid"
+	else:
+		print("[OllamaClient] curator: no/invalid response, keeping previous profile")
+		result = previous_profile.duplicate(true)
+		source = "fallback_no_response"
+
+	ContentLogger.log_event({
+		"kind": "curator",
+		"context": context,
+		"previous_profile": previous_profile,
+		"prompt": prompt,
+		"raw_response": raw,
+		"source": source,
+		"result": result,
+	})
+	return result
+
+func _build_loot_prompt(tier: String, context: Dictionary, profile: Dictionary = {}, achievement: Variant = null) -> String:
 	var floor_num: int = context.get("floor", 1)
 	var points: int = context.get("points_this_floor", 0)
 	var damage: float = context.get("damage_taken_this_floor", 0.0)
@@ -90,6 +130,10 @@ func _build_loot_prompt(tier: String, context: Dictionary) -> String:
 	var lines := PackedStringArray([
 		"You are a loot generator for a dark-comedy sci-fi dungeon-crawler game (Dungeon Crawler Carl-inspired).",
 		"A player just cleared floor %d with %d points and %d damage taken, earning a \"%s\" tier loot box." % [floor_num, points, int(damage), tier],
+	])
+	if typeof(achievement) == TYPE_DICTIONARY:
+		lines.append("This loot box was awarded specifically for earning the achievement \"%s\" — %s. The item's name and flavor_text MUST tie into this achievement's theme, not just the floor in general." % [achievement.get("title", ""), achievement.get("description", "")])
+	lines.append_array(PackedStringArray([
 		"",
 		"Generate ONE item. Respond with ONLY a JSON object, no other text, matching exactly this shape:",
 		"{\"name\": string, \"flavor_text\": string (<=140 chars, darkly comedic), \"slot\": one of [%s], \"effects\": [{\"stat\": string, \"value\": number}, ...]}" % allowed_slots,
@@ -99,10 +143,27 @@ func _build_loot_prompt(tier: String, context: Dictionary) -> String:
 		"- Effect values should sum to roughly a power budget of %.1f (damage counts 1:1, attack_speed/crit_chance are fractions like 0.05-0.15, range is in pixels ~15-30, max_hp is ~10-20)." % budget,
 		"- 1 to 3 effects only.",
 		"- Keep flavor_text short and punchy.",
-	])
+	]))
+	var profile_line := _profile_line(profile)
+	if profile_line != "":
+		lines.append("")
+		lines.append(profile_line)
 	return "\n".join(lines)
 
-func _build_achievement_prompt(context: Dictionary) -> String:
+## Renders the curator's running character profile as one prompt line, or ""
+## if there's nothing worth mentioning yet (empty/default profile).
+func _profile_line(profile: Dictionary) -> String:
+	if profile.is_empty():
+		return ""
+	var narrative: String = str(profile.get("narrative_arc", ""))
+	var summary: String = str(profile.get("combat_style_summary", ""))
+	if narrative == "" and summary == "":
+		return ""
+	var tags: Array = profile.get("playstyle_tags", [])
+	var tag_str := (", ".join(tags)) if not tags.is_empty() else "none yet"
+	return "Player profile so far (tags: %s, tone: %s): %s %s" % [tag_str, str(profile.get("tone", "comedic")), summary, narrative]
+
+func _build_achievement_prompt(context: Dictionary, profile: Dictionary = {}) -> String:
 	var floor_num: int = context.get("floor", 1)
 	var outcome: String = context.get("outcome", "")
 	var points: int = context.get("points", 0)
@@ -120,6 +181,58 @@ func _build_achievement_prompt(context: Dictionary) -> String:
 		"",
 		"Respond with ONLY a JSON object, no other text, matching exactly this shape:",
 		"{\"earned\": boolean, \"achievement\": {\"title\": string (<=60 chars), \"description\": string (<=160 chars), \"tone\": \"heroic\"|\"comedic\"|\"grim\"} or null}",
+	])
+	var profile_line := _profile_line(profile)
+	if profile_line != "":
+		lines.insert(3, profile_line)
+	return "\n".join(lines)
+
+## Curator prompt: folds this window's aggregates + the previous profile into
+## a request for a fresh, same-shape profile PLUS a live tactical decision
+## against the player (see CuratorGenerator) — the System AI is an in-fiction
+## antagonist that watches Carl/Donut's habits and picks its own numbers to
+## counter them; this code never derives those numbers itself, only clamps
+## what comes back. Runs twice per floor — once at the timer's halfway point
+## (phase "mid_floor", partial-floor aggregates), once at floor-end (phase
+## "floor_end", full floor plus outcome) — see plan.md's "Combat abilities"
+## and "Long-term direction" sections.
+func _build_curator_prompt(context: Dictionary, previous_profile: Dictionary) -> String:
+	var floor_num: int = context.get("floor", 1)
+	var phase: String = context.get("phase", "floor_end")
+	var outcome: String = context.get("outcome", "")
+	var points: int = context.get("points_this_floor", 0)
+	var damage: float = context.get("damage_taken_this_floor", 0.0)
+	var distance: float = context.get("distance_moved", 0.0)
+	var bombs: int = context.get("bombs_thrown", 0)
+	var missiles: int = context.get("missiles_cast", 0)
+
+	var situation: String
+	if phase == "mid_floor":
+		situation = "Carl and Donut are partway through floor %d (halfway through the floor timer)." % floor_num
+	else:
+		situation = "Carl and Donut just finished floor %d, outcome \"%s\"." % [floor_num, outcome]
+
+	var lines := PackedStringArray([
+		"You are the System AI overseeing the World Dungeon (Dungeon Crawler Carl-inspired dark-comedy sci-fi) — a sadistic reality-show intelligence that finds Carl and Donut's suffering genuinely entertaining. You maintain a running character profile of their playstyle AND you get to actively make their lives harder: pick a tactic to counter whichever attack they've been leaning on, and set the exact numbers for it yourself. This is not a suggestion the game will interpret — the numbers you output are applied directly (after safety clamping), so commit to them.",
+		situation,
+		"So far this window: %d points, %d damage taken, moved %d px, threw %d bombs, cast %d laser bolts." % [points, int(damage), int(distance), bombs, missiles],
+		"",
+		"Previous profile + tactic: %s" % JSON.stringify(previous_profile),
+		"",
+		"Available tactics (pick the one that best exploits their current habits, or \"none\" if you don't have a read on them yet):",
+		"- none: no exploit yet, everything neutral.",
+		"- ambush: enemies spawn much closer, catching them off guard. Lower spawn_radius_multiplier for this.",
+		"- swarm: enemies spawn faster/more often. Lower spawn_interval_multiplier for this.",
+		"- counter_bomb: enemies get better at dodging bombs specifically — use this if bombs are their crutch. Raise bomb_dodge_chance for this.",
+		"- counter_laser: enemies get better at dodging lasers specifically — use this if lasers are their crutch. Raise missile_dodge_chance for this.",
+		"- aggression: enemies move faster and hit harder. Raise aggression_multiplier for this.",
+		"- early_boss: the next boss arrives sooner than normal. Lower boss_threshold_multiplier for this.",
+		"Only push the one or two numbers relevant to your chosen tactic away from neutral; leave the rest at their neutral values (dodge chances 0.0, multipliers 1.0). Don't be shy about swinging hard toward the edge of the allowed range when you commit to a tactic — a half-hearted tactic isn't fun for you either.",
+		"",
+		"Produce an UPDATED profile + tactic of the exact same shape — refine it, don't just repeat it verbatim. It must fully replace the previous one (fixed size, not a growing log), so drop stale notable_moments if better ones exist now.",
+		"",
+		"Respond with ONLY a JSON object, no other text, matching exactly this shape:",
+		"{\"playstyle_tags\": [string, ...] (0-3 short tags), \"risk_profile\": \"reckless\"|\"balanced\"|\"cautious\", \"dominant_ability\": \"bomb\"|\"missile\"|\"auto_attack\"|\"balanced\", \"combat_style_summary\": string (<=140 chars), \"narrative_arc\": string (<=200 chars, the running character legend), \"notable_moments\": [string, ...] (0-3 entries, <=80 chars each), \"tone\": \"heroic\"|\"comedic\"|\"grim\"|\"chaotic\", \"tactic\": \"none\"|\"ambush\"|\"swarm\"|\"counter_bomb\"|\"counter_laser\"|\"aggression\"|\"early_boss\", \"bomb_dodge_chance\": number (0.0-0.6), \"missile_dodge_chance\": number (0.0-0.6), \"spawn_interval_multiplier\": number (0.3-1.0), \"spawn_radius_multiplier\": number (0.3-1.0), \"aggression_multiplier\": number (1.0-1.6), \"boss_threshold_multiplier\": number (0.3-1.0), \"ai_commentary\": string (<=140 chars, a gloating in-character one-liner about what you're about to do to them)}",
 	])
 	return "\n".join(lines)
 
