@@ -10,7 +10,12 @@ class_name CuratorGenerator
 ## whichever attack they've leaned on, using dedicated numeric fields it
 ## controls directly. Code only clamps those fields into safe ranges — it
 ## never computes them from a formula; the adaptation itself is the LLM's
-## call. See plan.md's "Long-term direction" and "Combat abilities" sections.
+## call. `ai_approach` is the one field meant to stay stable across many
+## cycles rather than being freely re-picked each time — the model's own
+## self-chosen long-term strategy for the run (see plan.md's "Long-term
+## direction" section), which it's prompted to preserve unless it decides a
+## real turning point justifies changing it. See plan.md's "Long-term
+## direction" and "Combat abilities" sections.
 
 const ALLOWED_RISK_PROFILES := ["reckless", "balanced", "cautious"]
 const ALLOWED_DOMINANT_ABILITIES := ["bomb", "missile", "auto_attack", "balanced"]
@@ -24,6 +29,7 @@ const SUMMARY_MAX_LEN := 140
 const NARRATIVE_MAX_LEN := 200
 const MOMENT_MAX_LEN := 80
 const COMMENTARY_MAX_LEN := 140
+const APPROACH_MAX_LEN := 160
 
 # Safety ranges for the System AI's tactical numbers — it picks the value
 # within these bounds, code just clamps rather than trusting raw output for
@@ -33,6 +39,22 @@ const SPAWN_INTERVAL_MULT_RANGE := Vector2(0.3, 1.0)   # lower = faster spawns
 const SPAWN_RADIUS_MULT_RANGE := Vector2(0.3, 1.0)     # lower = enemies land closer (ambush)
 const AGGRESSION_MULT_RANGE := Vector2(1.0, 1.6)       # enemy speed & contact damage
 const BOSS_THRESHOLD_MULT_RANGE := Vector2(0.3, 1.0)   # lower = next boss arrives sooner
+const LOOT_GENEROSITY_RANGE := Vector2(0.7, 1.4)       # lower = easier to hit a high loot tier (generous), higher = stingier
+
+# Aggregate safety net across the six combat-difficulty fields (the two dodge
+# chances, spawn interval/radius, aggression, boss threshold — everything
+# EXCEPT loot_generosity_multiplier, which isn't a difficulty lever). Each
+# field's clamped value contributes a normalized 0-1 "threat" score (0 =
+# neutral, 1 = the field maxed out at its extreme). THREAT_BUDGET == 2.0
+# matches the prompt's own instruction to push only the one or two numbers
+# relevant to the chosen tactic and leave the rest neutral — a compliant
+# response never gets touched by this. It only kicks in if the model ignores
+# that instruction and cranks several levers at once (a real risk with the
+# local 3B model — plan.md notes it doing exactly this in one observed run),
+# scaling every field's deviation from neutral down proportionally, same
+# discipline as LootGenerator scaling down an over-budget item's effects
+# rather than rejecting the response outright.
+const THREAT_BUDGET := 2.0
 
 const DEFAULT_PROFILE := {
 	"playstyle_tags": [],
@@ -49,7 +71,9 @@ const DEFAULT_PROFILE := {
 	"spawn_radius_multiplier": 1.0,
 	"aggression_multiplier": 1.0,
 	"boss_threshold_multiplier": 1.0,
+	"loot_generosity_multiplier": 1.0,
 	"ai_commentary": "",
+	"ai_approach": "",
 }
 
 ## Validates and clamps a raw (untrusted, possibly LLM-generated) profile.
@@ -77,6 +101,7 @@ static func validate_and_clamp(raw: Variant) -> Dictionary:
 	var combat_style_summary: String = str(raw.get("combat_style_summary", "")).left(SUMMARY_MAX_LEN).strip_edges()
 	var narrative_arc: String = str(raw.get("narrative_arc", "")).left(NARRATIVE_MAX_LEN).strip_edges()
 	var ai_commentary: String = str(raw.get("ai_commentary", "")).left(COMMENTARY_MAX_LEN).strip_edges()
+	var ai_approach: String = str(raw.get("ai_approach", "")).left(APPROACH_MAX_LEN).strip_edges()
 
 	var tags := []
 	var raw_tags = raw.get("playstyle_tags", [])
@@ -98,6 +123,27 @@ static func validate_and_clamp(raw: Variant) -> Dictionary:
 			if moment != "":
 				moments.append(moment)
 
+	# Each entry: [clamped value, neutral value, extreme value at full threat].
+	var threat_fields := {
+		"bomb_dodge_chance": [_clamp_field(raw.get("bomb_dodge_chance"), DODGE_CHANCE_RANGE, DEFAULT_PROFILE["bomb_dodge_chance"]), 0.0, DODGE_CHANCE_RANGE.y],
+		"missile_dodge_chance": [_clamp_field(raw.get("missile_dodge_chance"), DODGE_CHANCE_RANGE, DEFAULT_PROFILE["missile_dodge_chance"]), 0.0, DODGE_CHANCE_RANGE.y],
+		"spawn_interval_multiplier": [_clamp_field(raw.get("spawn_interval_multiplier"), SPAWN_INTERVAL_MULT_RANGE, DEFAULT_PROFILE["spawn_interval_multiplier"]), 1.0, SPAWN_INTERVAL_MULT_RANGE.x],
+		"spawn_radius_multiplier": [_clamp_field(raw.get("spawn_radius_multiplier"), SPAWN_RADIUS_MULT_RANGE, DEFAULT_PROFILE["spawn_radius_multiplier"]), 1.0, SPAWN_RADIUS_MULT_RANGE.x],
+		"aggression_multiplier": [_clamp_field(raw.get("aggression_multiplier"), AGGRESSION_MULT_RANGE, DEFAULT_PROFILE["aggression_multiplier"]), 1.0, AGGRESSION_MULT_RANGE.y],
+		"boss_threshold_multiplier": [_clamp_field(raw.get("boss_threshold_multiplier"), BOSS_THRESHOLD_MULT_RANGE, DEFAULT_PROFILE["boss_threshold_multiplier"]), 1.0, BOSS_THRESHOLD_MULT_RANGE.x],
+	}
+
+	var total_threat := 0.0
+	for key in threat_fields:
+		var f: Array = threat_fields[key]
+		total_threat += _threat_score(f[0], f[1], f[2])
+
+	if total_threat > THREAT_BUDGET:
+		var scale: float = THREAT_BUDGET / total_threat
+		for key in threat_fields:
+			var f: Array = threat_fields[key]
+			threat_fields[key][0] = f[1] + (f[0] - f[1]) * scale
+
 	return {
 		"playstyle_tags": tags,
 		"risk_profile": risk_profile,
@@ -107,13 +153,15 @@ static func validate_and_clamp(raw: Variant) -> Dictionary:
 		"notable_moments": moments,
 		"tone": tone,
 		"tactic": tactic,
-		"bomb_dodge_chance": _clamp_field(raw.get("bomb_dodge_chance"), DODGE_CHANCE_RANGE, DEFAULT_PROFILE["bomb_dodge_chance"]),
-		"missile_dodge_chance": _clamp_field(raw.get("missile_dodge_chance"), DODGE_CHANCE_RANGE, DEFAULT_PROFILE["missile_dodge_chance"]),
-		"spawn_interval_multiplier": _clamp_field(raw.get("spawn_interval_multiplier"), SPAWN_INTERVAL_MULT_RANGE, DEFAULT_PROFILE["spawn_interval_multiplier"]),
-		"spawn_radius_multiplier": _clamp_field(raw.get("spawn_radius_multiplier"), SPAWN_RADIUS_MULT_RANGE, DEFAULT_PROFILE["spawn_radius_multiplier"]),
-		"aggression_multiplier": _clamp_field(raw.get("aggression_multiplier"), AGGRESSION_MULT_RANGE, DEFAULT_PROFILE["aggression_multiplier"]),
-		"boss_threshold_multiplier": _clamp_field(raw.get("boss_threshold_multiplier"), BOSS_THRESHOLD_MULT_RANGE, DEFAULT_PROFILE["boss_threshold_multiplier"]),
+		"bomb_dodge_chance": threat_fields["bomb_dodge_chance"][0],
+		"missile_dodge_chance": threat_fields["missile_dodge_chance"][0],
+		"spawn_interval_multiplier": threat_fields["spawn_interval_multiplier"][0],
+		"spawn_radius_multiplier": threat_fields["spawn_radius_multiplier"][0],
+		"aggression_multiplier": threat_fields["aggression_multiplier"][0],
+		"boss_threshold_multiplier": threat_fields["boss_threshold_multiplier"][0],
+		"loot_generosity_multiplier": _clamp_field(raw.get("loot_generosity_multiplier"), LOOT_GENEROSITY_RANGE, DEFAULT_PROFILE["loot_generosity_multiplier"]),
 		"ai_commentary": ai_commentary,
+		"ai_approach": ai_approach,
 	}
 
 ## Clamps one untrusted numeric field into [range.x, range.y], or returns
@@ -122,3 +170,10 @@ static func _clamp_field(raw_value: Variant, range: Vector2, fallback: float) ->
 	if not (raw_value is float or raw_value is int):
 		return fallback
 	return clampf(float(raw_value), range.x, range.y)
+
+## Normalizes how far `value` sits from `neutral` toward `extreme` into 0-1
+## (0 = neutral, 1 = fully at the extreme) — see THREAT_BUDGET above.
+static func _threat_score(value: float, neutral: float, extreme: float) -> float:
+	if is_equal_approx(extreme, neutral):
+		return 0.0
+	return absf(value - neutral) / absf(extreme - neutral)

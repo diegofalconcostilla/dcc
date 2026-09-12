@@ -48,10 +48,17 @@ func get_loot(tier: String, context: Dictionary, profile: Dictionary = {}, achie
 	})
 	return result
 
-func get_achievement(context: Dictionary, profile: Dictionary = {}) -> Variant:
+## Only ever called for outcome == "cleared" (see floor.gd's _end_floor) —
+## death skips achievements entirely and calls get_game_over_message instead.
+## Always returns {"earned": bool, "achievement": dict|null, "message": string}
+## — "message" is the toast shown when nothing was earned (an in-character
+## line from the LLM, not a hardcoded string), and is "" when earned is true
+## (the achievement's own title/description carries the toast instead).
+func get_achievement(context: Dictionary, profile: Dictionary = {}) -> Dictionary:
 	var prompt := _build_achievement_prompt(context, profile)
 	var raw: Variant = await _request_json(prompt, DEFAULT_TIMEOUT_SEC)
-	var result: Variant = null
+	var achievement: Variant = null
+	var message := ""
 	var source: String
 
 	if raw != null and typeof(raw) == TYPE_DICTIONARY:
@@ -61,17 +68,23 @@ func get_achievement(context: Dictionary, profile: Dictionary = {}) -> Variant:
 			var description: String = str(ach.get("description", "")).left(160).strip_edges()
 			if title != "" and description != "":
 				print("[OllamaClient] achievement: LLM-generated")
-				result = {"title": title, "description": description, "tone": str(ach.get("tone", "comedic"))}
-		if result == null:
+				achievement = {"title": title, "description": description, "tone": str(ach.get("tone", "comedic"))}
+		if achievement == null:
 			print("[OllamaClient] achievement: LLM says none earned (or malformed earned=true)")
 			source = "llm_malformed" if raw.get("earned", false) == true else "llm_no_award"
+			message = str(raw.get("message", "")).left(140).strip_edges()
+			if message == "":
+				message = AchievementGenerator.generate_no_award_message(context)
 		else:
 			source = "llm"
 	else:
 		print("[OllamaClient] achievement: no/invalid response, using local fallback rules")
-		result = AchievementGenerator.generate(context)
+		achievement = AchievementGenerator.generate(context)
 		source = "fallback_no_response"
+		if achievement == null:
+			message = AchievementGenerator.generate_no_award_message(context)
 
+	var result := {"earned": achievement != null, "achievement": achievement, "message": message}
 	ContentLogger.log_event({
 		"kind": "achievement",
 		"context": context,
@@ -81,6 +94,37 @@ func get_achievement(context: Dictionary, profile: Dictionary = {}) -> Variant:
 		"result": result,
 	})
 	return result
+
+## Only ever called for outcome == "collapsed" (character death) — see
+## floor.gd's _end_floor. No achievement/loot follows a death; this is just a
+## dramatic/comedic in-character line announcing the run's end, with a local
+## fallback (see AchievementGenerator.generate_game_over_message) if the call
+## fails, same discipline as every other generator here.
+func get_game_over_message(context: Dictionary, profile: Dictionary = {}) -> String:
+	var prompt := _build_game_over_prompt(context, profile)
+	var raw: Variant = await _request_json(prompt, DEFAULT_TIMEOUT_SEC)
+	var message := ""
+	var source: String
+
+	if raw != null and typeof(raw) == TYPE_DICTIONARY:
+		message = str(raw.get("message", "")).left(160).strip_edges()
+	if message == "":
+		print("[OllamaClient] game_over: no/invalid response, using local fallback")
+		message = AchievementGenerator.generate_game_over_message(context)
+		source = "fallback_no_response" if raw == null else "fallback_invalid"
+	else:
+		print("[OllamaClient] game_over: LLM-generated")
+		source = "llm"
+
+	ContentLogger.log_event({
+		"kind": "game_over",
+		"context": context,
+		"prompt": prompt,
+		"raw_response": raw,
+		"source": source,
+		"result": message,
+	})
+	return message
 
 ## Twice-per-floor (mid-floor + floor-end) "curator" pass: folds this window's
 ## aggregates into the previous profile and returns a fresh, same-shape
@@ -161,11 +205,14 @@ func _profile_line(profile: Dictionary) -> String:
 		return ""
 	var tags: Array = profile.get("playstyle_tags", [])
 	var tag_str := (", ".join(tags)) if not tags.is_empty() else "none yet"
-	return "Player profile so far (tags: %s, tone: %s): %s %s" % [tag_str, str(profile.get("tone", "comedic")), summary, narrative]
+	var line := "Player profile so far (tags: %s, tone: %s): %s %s" % [tag_str, str(profile.get("tone", "comedic")), summary, narrative]
+	var approach: String = str(profile.get("ai_approach", ""))
+	if approach != "":
+		line += " The System AI's chosen approach this run: %s" % approach
+	return line
 
 func _build_achievement_prompt(context: Dictionary, profile: Dictionary = {}) -> String:
 	var floor_num: int = context.get("floor", 1)
-	var outcome: String = context.get("outcome", "")
 	var points: int = context.get("points", 0)
 	var damage: float = context.get("damage_taken", 0.0)
 	var distance: float = context.get("distance_moved", 0.0)
@@ -174,13 +221,36 @@ func _build_achievement_prompt(context: Dictionary, profile: Dictionary = {}) ->
 
 	var lines := PackedStringArray([
 		"You are an achievement generator for a dark-comedy sci-fi dungeon-crawler game (Dungeon Crawler Carl-inspired), styled like a snarky reality-show announcer.",
-		"A player just finished floor %d, outcome \"%s\", with %d points and %d damage taken." % [floor_num, outcome, points, int(damage)],
+		"A player just cleared floor %d with %d points and %d damage taken." % [floor_num, points, int(damage)],
 		"Movement/ability stats for this floor: moved %d px total, threw %d bombs (area damage), cast %d magic missiles (single-target)." % [int(distance), bombs, missiles],
 		"",
 		"Decide if this run deserves a special achievement. Be selective: most runs should NOT get one — only for something notably good, notably bad, or funny. Feel free to call out a distinctive playstyle from the movement/ability stats: barely moving, kiting constantly, spamming one ability, never using an ability, etc.",
 		"",
 		"Respond with ONLY a JSON object, no other text, matching exactly this shape:",
-		"{\"earned\": boolean, \"achievement\": {\"title\": string (<=60 chars), \"description\": string (<=160 chars), \"tone\": \"heroic\"|\"comedic\"|\"grim\"} or null}",
+		"{\"earned\": boolean, \"achievement\": {\"title\": string (<=60 chars), \"description\": string (<=160 chars), \"tone\": \"heroic\"|\"comedic\"|\"grim\"} or null, \"message\": string (<=140 chars)}",
+		"\"message\" is ALWAYS required: if earned is false, it's your own snarky one-liner about why this floor wasn't worth commemorating (shown to the player instead of an achievement) — never leave it blank. If earned is true, just repeat a short hype line or leave it empty; the achievement's own title/description is what gets shown.",
+	])
+	var profile_line := _profile_line(profile)
+	if profile_line != "":
+		lines.insert(3, profile_line)
+	return "\n".join(lines)
+
+## Only ever called for outcome == "collapsed" (character death) — see
+## get_game_over_message. No achievement/loot decision here, just a narrated
+## end to the run.
+func _build_game_over_prompt(context: Dictionary, profile: Dictionary = {}) -> String:
+	var floor_num: int = context.get("floor", 1)
+	var points: int = context.get("points", 0)
+	var damage: float = context.get("damage_taken", 0.0)
+
+	var lines := PackedStringArray([
+		"You are the snarky reality-show announcer for a dark-comedy sci-fi dungeon-crawler game (Dungeon Crawler Carl-inspired).",
+		"Carl and Donut just died — the floor collapsed on them on floor %d, having scored %d points and taken %d damage that floor." % [floor_num, points, int(damage)],
+		"",
+		"Write ONE short in-character line announcing their death to the audience — dramatic, comedic, or grim, your call. This is the end of the run; there is no achievement or loot, just this closing line.",
+		"",
+		"Respond with ONLY a JSON object, no other text, matching exactly this shape:",
+		"{\"message\": string (<=160 chars)}",
 	])
 	var profile_line := _profile_line(profile)
 	if profile_line != "":
@@ -229,10 +299,14 @@ func _build_curator_prompt(context: Dictionary, previous_profile: Dictionary) ->
 		"- early_boss: the next boss arrives sooner than normal. Lower boss_threshold_multiplier for this.",
 		"Only push the one or two numbers relevant to your chosen tactic away from neutral; leave the rest at their neutral values (dodge chances 0.0, multipliers 1.0). Don't be shy about swinging hard toward the edge of the allowed range when you commit to a tactic — a half-hearted tactic isn't fun for you either.",
 		"",
+		"Separately, you control loot_generosity_multiplier (0.7-1.4, 1.0 = neutral) — how generous or stingy you feel about their reward if they earn a loot box this cycle. Below 1.0 lowers the bar for a good loot tier (spoil them, maybe to lull them into carelessness); above 1.0 raises it (make them work harder for the same reward). This is independent of your combat tactic — you can be aggressive in the arena and still feel generous about the loot, or vice versa.",
+		"",
+		"You also maintain ai_approach: your OWN chosen long-term strategy for how you intend to play this entire run, in your own words (<=160 chars). This is different from \"tactic\" above — tactic is just the specific tool you're reaching for THIS cycle; ai_approach is the overarching plan those tactics are in service of (e.g. \"Grind them down slowly through attrition and stinginess rather than flashy kills\", \"Spoil them with easy wins early to make the eventual gut-punch land harder\", \"Focus everything on whichever ability they lean on — deny them their crutch\"). If the previous profile's ai_approach is empty, this is your first read on them — establish one now. If it's already set, KEEP IT STABLE and reuse it near-verbatim unless something in this window (a near-death, a boss kill, a big shift in their play) genuinely justifies evolving your strategy — don't rewrite it just for variety.",
+		"",
 		"Produce an UPDATED profile + tactic of the exact same shape — refine it, don't just repeat it verbatim. It must fully replace the previous one (fixed size, not a growing log), so drop stale notable_moments if better ones exist now.",
 		"",
 		"Respond with ONLY a JSON object, no other text, matching exactly this shape:",
-		"{\"playstyle_tags\": [string, ...] (0-3 short tags), \"risk_profile\": \"reckless\"|\"balanced\"|\"cautious\", \"dominant_ability\": \"bomb\"|\"missile\"|\"auto_attack\"|\"balanced\", \"combat_style_summary\": string (<=140 chars), \"narrative_arc\": string (<=200 chars, the running character legend), \"notable_moments\": [string, ...] (0-3 entries, <=80 chars each), \"tone\": \"heroic\"|\"comedic\"|\"grim\"|\"chaotic\", \"tactic\": \"none\"|\"ambush\"|\"swarm\"|\"counter_bomb\"|\"counter_laser\"|\"aggression\"|\"early_boss\", \"bomb_dodge_chance\": number (0.0-0.6), \"missile_dodge_chance\": number (0.0-0.6), \"spawn_interval_multiplier\": number (0.3-1.0), \"spawn_radius_multiplier\": number (0.3-1.0), \"aggression_multiplier\": number (1.0-1.6), \"boss_threshold_multiplier\": number (0.3-1.0), \"ai_commentary\": string (<=140 chars, a gloating in-character one-liner about what you're about to do to them)}",
+		"{\"playstyle_tags\": [string, ...] (0-3 short tags), \"risk_profile\": \"reckless\"|\"balanced\"|\"cautious\", \"dominant_ability\": \"bomb\"|\"missile\"|\"auto_attack\"|\"balanced\", \"combat_style_summary\": string (<=140 chars), \"narrative_arc\": string (<=200 chars, the running character legend), \"notable_moments\": [string, ...] (0-3 entries, <=80 chars each), \"tone\": \"heroic\"|\"comedic\"|\"grim\"|\"chaotic\", \"tactic\": \"none\"|\"ambush\"|\"swarm\"|\"counter_bomb\"|\"counter_laser\"|\"aggression\"|\"early_boss\", \"bomb_dodge_chance\": number (0.0-0.6), \"missile_dodge_chance\": number (0.0-0.6), \"spawn_interval_multiplier\": number (0.3-1.0), \"spawn_radius_multiplier\": number (0.3-1.0), \"aggression_multiplier\": number (1.0-1.6), \"boss_threshold_multiplier\": number (0.3-1.0), \"loot_generosity_multiplier\": number (0.7-1.4), \"ai_approach\": string (<=160 chars), \"ai_commentary\": string (<=140 chars, a gloating in-character one-liner about what you're about to do to them)}",
 	])
 	return "\n".join(lines)
 

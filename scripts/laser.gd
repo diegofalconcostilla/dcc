@@ -34,6 +34,8 @@ func _physics_process(delta: float) -> void:
 	_traveled += step
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		if global_position.distance_to(enemy.global_position) <= HIT_RADIUS:
+			if enemy.has_method("is_dodging_laser") and enemy.is_dodging_laser():
+				continue  # successfully dodged — beam passes through, may still hit someone else
 			if enemy.has_method("take_damage"):
 				enemy.take_damage(damage)
 			queue_free()

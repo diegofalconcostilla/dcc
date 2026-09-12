@@ -156,10 +156,6 @@ func _end_floor(outcome: String) -> void:
 	floor_active = false
 	get_tree().paused = true
 
-	# Loot is now achievement-gated: no achievement, no loot box. This is
-	# decided before loot generation, on purpose, so the loot call (when it
-	# happens) can reference the achievement and generate something thematically
-	# tied to it, rather than the two being generated independently.
 	var floor_end_context := {
 		"floor": current_floor,
 		"outcome": outcome,
@@ -169,28 +165,44 @@ func _end_floor(outcome: String) -> void:
 		"bombs_thrown": player.floor_bombs_thrown,
 		"missiles_cast": player.floor_missiles_cast,
 	}
-	var achievement = await ollama.get_achievement(floor_end_context, character_profile)
-	if achievement != null:
-		await get_tree().create_timer(3.5).timeout
-		hud.show_toast("Achievement unlocked: %s — %s" % [achievement["title"], achievement["description"]])
-		print("Achievement: %s" % achievement)
-		await get_tree().create_timer(3.5).timeout
 
-		var tier := LootGenerator.compute_tier(floor_points, floor_damage_taken)
-		hud.show_toast("Opening [%s] loot box..." % tier.to_upper())
-		var loot: Dictionary = await ollama.get_loot(tier, {
-			"floor": current_floor,
-			"points_this_floor": floor_points,
-			"damage_taken_this_floor": floor_damage_taken,
-		}, character_profile, achievement)
-		player.apply_loot(loot)
-		hud.show_toast("Loot: [%s] %s — %s" % [tier.to_upper(), loot["name"], loot["flavor_text"]])
-		print("Floor %d ended: outcome=%s tier=%s loot=%s achievement=%s" % [current_floor, outcome, tier, loot, achievement["title"]])
-		await get_tree().create_timer(3.0).timeout
+	if outcome == "collapsed":
+		# Character died: no achievements, no loot — just a narrated end to
+		# the run (see OllamaClient.get_game_over_message).
+		var death_message: String = await ollama.get_game_over_message(floor_end_context, character_profile)
+		hud.show_toast(death_message)
+		print("Floor %d ended: outcome=collapsed. %s" % [current_floor, death_message])
+		await get_tree().create_timer(3.5).timeout
 	else:
-		hud.show_toast("Floor %d %s. No achievement this time — no loot." % [current_floor, outcome])
-		print("Floor %d ended: outcome=%s, no achievement, no loot" % [current_floor, outcome])
-		await get_tree().create_timer(2.0).timeout
+		# Loot is achievement-gated: no achievement, no loot box. This is
+		# decided before loot generation, on purpose, so the loot call (when it
+		# happens) can reference the achievement and generate something
+		# thematically tied to it, rather than the two being generated
+		# independently.
+		var result: Dictionary = await ollama.get_achievement(floor_end_context, character_profile)
+		if result.get("earned", false):
+			var achievement: Dictionary = result["achievement"]
+			await get_tree().create_timer(3.5).timeout
+			hud.show_toast("Achievement unlocked: %s — %s" % [achievement["title"], achievement["description"]])
+			print("Achievement: %s" % achievement)
+			await get_tree().create_timer(3.5).timeout
+
+			var tier := LootGenerator.compute_tier(current_floor, floor_points, floor_damage_taken, character_profile.get("loot_generosity_multiplier", 1.0))
+			hud.show_toast("Opening [%s] loot box..." % tier.to_upper())
+			var loot: Dictionary = await ollama.get_loot(tier, {
+				"floor": current_floor,
+				"points_this_floor": floor_points,
+				"damage_taken_this_floor": floor_damage_taken,
+			}, character_profile, achievement)
+			player.apply_loot(loot)
+			hud.show_toast("Loot: [%s] %s — %s" % [tier.to_upper(), loot["name"], loot["flavor_text"]])
+			print("Floor %d ended: outcome=%s tier=%s loot=%s achievement=%s" % [current_floor, outcome, tier, loot, achievement["title"]])
+			await get_tree().create_timer(3.0).timeout
+		else:
+			var message: String = result.get("message", "")
+			hud.show_toast(message)
+			print("Floor %d ended: outcome=%s, no achievement, no loot. %s" % [current_floor, outcome, message])
+			await get_tree().create_timer(2.0).timeout
 
 	# If the mid-floor call is still in flight (e.g. a cold Ollama load outlasting
 	# a short DCC_FLOOR_DURATION test floor), wait for it so its result can't

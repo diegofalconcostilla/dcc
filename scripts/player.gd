@@ -36,6 +36,18 @@ const LEVEL_UP_COOLDOWN_REDUCTION := 0.03
 const LEVEL_UP_MAX_HP_BONUS := 8.0
 const MIN_COOLDOWN_MULTIPLIER := 0.3
 
+# XP threshold growth per level: xp_to_next = xp_to_next * XP_GROWTH_MULT +
+# XP_GROWTH_ADD (2026-09-11, simulation-tuned — see plan.md's XP curve
+# tuning notes). The original 1.25x/+5 growth compounded faster than the
+# player's own kill throughput could keep up with: a Monte Carlo simulation
+# of the actual combat/level math showed level-ups collapsing from 5/floor on
+# floor 1 to exactly 1/floor (sometimes 0) by floor 4 onward — meaning the
+# only non-loot source of player power growth stalled for most of a 10-floor
+# run while enemies keep scaling up regardless. These gentler constants keep
+# at least ~1 level-up every floor throughout a full run instead.
+const XP_GROWTH_MULT := 1.12
+const XP_GROWTH_ADD := 4.0
+
 var max_hp := 100.0
 var hp := 100.0
 var level := 1
@@ -208,7 +220,7 @@ func gain_xp(amount: float) -> void:
 	while xp >= xp_to_next:
 		xp -= xp_to_next
 		level += 1
-		xp_to_next = xp_to_next * 1.25 + 5.0
+		xp_to_next = xp_to_next * XP_GROWTH_MULT + XP_GROWTH_ADD
 		leveled_up.emit(level)
 	xp_changed.emit(xp, xp_to_next)
 

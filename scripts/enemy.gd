@@ -15,9 +15,24 @@ const DODGE_DURATION := 0.35
 const DODGE_SPEED_MULTIPLIER := 1.4
 const DODGE_LINE_TOLERANCE := 60.0  # how close to a laser's path counts as "in danger"
 
+# A laser travels at 900px/s (see Laser.SPEED) with a 14px hit radius — an
+# enemy starting right on the beam's line only has enough time to physically
+# sidestep clear of that radius if it's >~130px along the beam's path when
+# fired (dodge speed 98px/s * transit time > 14px). Since real engagements
+# happen well inside that range (auto-attack range is 140px, contact damage
+# triggers at ~28px), a "successful" dodge roll on a close enemy is often a
+# geometrically wasted roll — the beam can outrun the sidestep. Rather than
+# make enemies dodge unrealistically fast, a successful line-dodge grants a
+# brief damage-immunity window instead (covers any laser's full possible
+# flight time — max_range 260 / SPEED 900 ≈ 0.29s), so a "you dodged" roll
+# reliably means "you don't get hit," matching what the roll is telling the
+# player, regardless of how little physical space there was to react in.
+const LASER_DODGE_IFRAME := 0.3
+
 var _contact_cooldown := 0.0
 var _dodge_timer := 0.0
 var _dodge_dir := Vector2.ZERO
+var _laser_iframe_timer := 0.0
 
 func _ready() -> void:
 	add_to_group("enemies")
@@ -40,6 +55,8 @@ func _physics_process(delta: float) -> void:
 			dir = (player.global_position - global_position).normalized()
 		velocity = dir * move_speed
 		move_and_slide()
+		if _laser_iframe_timer > 0.0:
+			_laser_iframe_timer -= delta
 		if _contact_cooldown > 0.0:
 			_contact_cooldown -= delta
 		elif global_position.distance_to(player.global_position) <= radius + 16.0:
@@ -104,3 +121,9 @@ func try_dodge_line(origin: Vector2, dir: Vector2, max_range: float, chance: flo
 	if _dodge_dir == Vector2.ZERO:
 		_dodge_dir = dir.rotated(PI / 2.0)
 	_dodge_timer = DODGE_DURATION
+	_laser_iframe_timer = LASER_DODGE_IFRAME
+
+## True while a successful line-dodge's damage-immunity window is active (see
+## LASER_DODGE_IFRAME) — checked by Laser before applying damage.
+func is_dodging_laser() -> bool:
+	return _laser_iframe_timer > 0.0

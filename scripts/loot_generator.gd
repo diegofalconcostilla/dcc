@@ -47,16 +47,49 @@ const FALLBACK_ITEMS := {
 	],
 }
 
-# Performance -> tier. Thresholds are placeholders pending real playtesting data.
-static func compute_tier(points: int, damage_taken: float) -> String:
+# Floor-relative baseline scores (see plan.md's tuning notes, 2026-09-11): a
+# Monte Carlo simulation of the actual spawn/attack math (auto-attack only, no
+# bomb/laser, no damage taken — so these are optimistic, not a hard ceiling)
+# showed raw floor_points grows sharply across a run just from the player's
+# own level/damage scaling, independent of skill. A single flat point
+# threshold made "legendary" the default outcome by the mid-run and
+# meaningless past it — tier is now measured against *this floor's* expected
+# score instead of an absolute number. Index 0 = floor 1.
+#
+# Re-simulated 2026-09-11 after retuning Player's XP curve (see
+# XP_GROWTH_MULT/XP_GROWTH_ADD) — these two changes are coupled: a gentler
+# XP curve means the player reaches higher damage/lower cooldown earlier in
+# the run, which raises achievable kill counts (and thus points) per floor,
+# so this table had to be regenerated against the new curve to stay accurate
+# rather than making "legendary" too easy again.
+const FLOOR_BASELINE_SCORE := [590.0, 1130.0, 1360.0, 1380.0, 1390.0, 1390.0, 1390.0, 1390.0, 1390.0, 1390.0]
+
+# score / (baseline * generosity_multiplier) ratio cutoffs. A ratio of 1.0 —
+# an exactly average floor for this point in the run — lands on "rare";
+# under/over that shifts down/up through the tiers. Placeholders pending real
+# playtesting (the simulation only estimates the baseline, not these bands).
+const TIER_RATIO_COMMON := 0.5
+const TIER_RATIO_UNCOMMON := 0.85
+const TIER_RATIO_RARE := 1.15
+const TIER_RATIO_EPIC := 1.5
+
+## `generosity_multiplier` is the System AI's own lever (see CuratorGenerator's
+## loot_generosity_multiplier) on how hard this floor's baseline is to beat —
+## below 1.0 lowers the bar (generous mood), above 1.0 raises it (stingy
+## mood). Code never picks this value itself, only clamps it; see plan.md's
+## "Combat abilities" section for the parallel System AI tactic pattern.
+static func compute_tier(floor_num: int, points: int, damage_taken: float, generosity_multiplier: float = 1.0) -> String:
 	var score := float(points) - damage_taken * 2.0
-	if score < 50:
+	var idx: int = clampi(floor_num, 1, FLOOR_BASELINE_SCORE.size()) - 1
+	var baseline: float = FLOOR_BASELINE_SCORE[idx] * generosity_multiplier
+	var ratio: float = score / baseline if baseline > 0.0 else 0.0
+	if ratio < TIER_RATIO_COMMON:
 		return "common"
-	elif score < 150:
+	elif ratio < TIER_RATIO_UNCOMMON:
 		return "uncommon"
-	elif score < 350:
+	elif ratio < TIER_RATIO_RARE:
 		return "rare"
-	elif score < 700:
+	elif ratio < TIER_RATIO_EPIC:
 		return "epic"
 	else:
 		return "legendary"
