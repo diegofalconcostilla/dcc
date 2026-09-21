@@ -53,6 +53,12 @@ func apply_profile(profile: Dictionary) -> void:
 	_spawn_radius_mult = profile.get("spawn_radius_multiplier", 1.0)
 	_aggression_mult = profile.get("aggression_multiplier", 1.0)
 
+## Current System AI aggression (enemy speed & contact damage multiplier).
+## Enemies read this every frame rather than baking it in at spawn, so a
+## per-second director beat affects enemies already on the field.
+func get_aggression() -> float:
+	return _aggression_mult
+
 func _spawn_enemy() -> void:
 	var player := get_tree().get_first_node_in_group("player")
 	if player == null:
@@ -64,8 +70,8 @@ func _spawn_enemy() -> void:
 	var difficulty_factor := 1.0 + elapsed / 60.0
 	get_parent().add_child(enemy)
 	enemy.scale_difficulty(difficulty_factor)
-	enemy.speed *= floor_speed_multiplier * _aggression_mult
-	enemy.contact_damage *= _aggression_mult
+	enemy.speed *= floor_speed_multiplier
+	enemy.spawner = self  # aggression is read live from here, not baked in
 	enemy.died.connect(_on_enemy_died.bind(enemy.xp_value))
 
 func _spawn_boss() -> void:
@@ -80,8 +86,8 @@ func _spawn_boss() -> void:
 	var difficulty_factor := 1.0 + elapsed / 60.0
 	get_parent().add_child(boss)
 	boss.scale_difficulty(difficulty_factor)
-	boss.speed *= floor_speed_multiplier * _aggression_mult
-	boss.contact_damage *= _aggression_mult
+	boss.speed *= floor_speed_multiplier
+	boss.spawner = self
 	boss.died.connect(_on_boss_died.bind(boss.xp_value))
 	boss_spawned.emit()
 

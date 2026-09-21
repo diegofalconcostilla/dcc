@@ -123,6 +123,33 @@ static func validate_and_clamp(raw: Variant) -> Dictionary:
 			if moment != "":
 				moments.append(moment)
 
+	var tactics := clamp_tactics(raw)
+
+	return {
+		"playstyle_tags": tags,
+		"risk_profile": risk_profile,
+		"dominant_ability": dominant_ability,
+		"combat_style_summary": combat_style_summary,
+		"narrative_arc": narrative_arc,
+		"notable_moments": moments,
+		"tone": tone,
+		"tactic": tactic,
+		"bomb_dodge_chance": tactics["bomb_dodge_chance"],
+		"missile_dodge_chance": tactics["missile_dodge_chance"],
+		"spawn_interval_multiplier": tactics["spawn_interval_multiplier"],
+		"spawn_radius_multiplier": tactics["spawn_radius_multiplier"],
+		"aggression_multiplier": tactics["aggression_multiplier"],
+		"boss_threshold_multiplier": tactics["boss_threshold_multiplier"],
+		"loot_generosity_multiplier": _clamp_field(raw.get("loot_generosity_multiplier"), LOOT_GENEROSITY_RANGE, DEFAULT_PROFILE["loot_generosity_multiplier"]),
+		"ai_commentary": ai_commentary,
+		"ai_approach": ai_approach,
+	}
+
+## Clamps the six combat-difficulty fields of an untrusted dict into their
+## safe ranges (missing/non-numeric -> neutral) and applies the joint
+## THREAT_BUDGET scale-down. Shared by the curator's profile and
+## DirectorGenerator's per-second beats, so both get identical safety.
+static func clamp_tactics(raw: Dictionary) -> Dictionary:
 	# Each entry: [clamped value, neutral value, extreme value at full threat].
 	var threat_fields := {
 		"bomb_dodge_chance": [_clamp_field(raw.get("bomb_dodge_chance"), DODGE_CHANCE_RANGE, DEFAULT_PROFILE["bomb_dodge_chance"]), 0.0, DODGE_CHANCE_RANGE.y],
@@ -144,25 +171,10 @@ static func validate_and_clamp(raw: Variant) -> Dictionary:
 			var f: Array = threat_fields[key]
 			threat_fields[key][0] = f[1] + (f[0] - f[1]) * scale
 
-	return {
-		"playstyle_tags": tags,
-		"risk_profile": risk_profile,
-		"dominant_ability": dominant_ability,
-		"combat_style_summary": combat_style_summary,
-		"narrative_arc": narrative_arc,
-		"notable_moments": moments,
-		"tone": tone,
-		"tactic": tactic,
-		"bomb_dodge_chance": threat_fields["bomb_dodge_chance"][0],
-		"missile_dodge_chance": threat_fields["missile_dodge_chance"][0],
-		"spawn_interval_multiplier": threat_fields["spawn_interval_multiplier"][0],
-		"spawn_radius_multiplier": threat_fields["spawn_radius_multiplier"][0],
-		"aggression_multiplier": threat_fields["aggression_multiplier"][0],
-		"boss_threshold_multiplier": threat_fields["boss_threshold_multiplier"][0],
-		"loot_generosity_multiplier": _clamp_field(raw.get("loot_generosity_multiplier"), LOOT_GENEROSITY_RANGE, DEFAULT_PROFILE["loot_generosity_multiplier"]),
-		"ai_commentary": ai_commentary,
-		"ai_approach": ai_approach,
-	}
+	var out := {}
+	for key in threat_fields:
+		out[key] = threat_fields[key][0]
+	return out
 
 ## Clamps one untrusted numeric field into [range.x, range.y], or returns
 ## `fallback` (a neutral, no-op value) if it's missing/not a number.

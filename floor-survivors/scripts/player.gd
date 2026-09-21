@@ -127,10 +127,12 @@ func _handle_attack(delta: float) -> void:
 		return
 	_attack_timer = attack_cooldown
 	var damage := attack_damage
+	var crit := false
 	if randf() < crit_chance:
 		damage *= 2.0
+		crit = true
 	if target.has_method("take_damage"):
-		target.take_damage(damage)
+		target.take_damage(damage, crit)
 	_attack_flash_target = to_local(target.global_position)
 	_attack_flash_timer = 0.1
 
@@ -179,14 +181,16 @@ func _cast_missile() -> void:
 	laser.dodge_chance = _get_character_profile().get("missile_dodge_chance", 0.0)
 	get_parent().add_child(laser)
 
-## The System AI's current read on the player, kept on the floor controller
-## (see floor.gd's character_profile) — dodge chances come straight from its
-## bomb_dodge_chance/missile_dodge_chance fields. Never computed locally;
-## this is just where Player looks it up. {} (all defaults) if unavailable.
+## The System AI's current numbers, kept on the floor controller (see
+## floor.gd's get_effective_profile — the curator's profile with the live
+## director's per-second numbers merged over it) — dodge chances come straight
+## from its bomb_dodge_chance/missile_dodge_chance fields. Never computed
+## locally; this is just where Player looks it up. {} (all defaults) if
+## unavailable.
 func _get_character_profile() -> Dictionary:
 	var floor_node := get_tree().get_first_node_in_group("floor_controller")
-	if floor_node and "character_profile" in floor_node:
-		return floor_node.character_profile
+	if floor_node and floor_node.has_method("get_effective_profile"):
+		return floor_node.get_effective_profile()
 	return {}
 
 func _clamp_to_range(world_pos: Vector2, max_range: float) -> Vector2:
@@ -195,19 +199,87 @@ func _clamp_to_range(world_pos: Vector2, max_range: float) -> Vector2:
 		offset = offset.normalized() * max_range
 	return global_position + offset
 
+## 0 = ready, 1 = just used (for the HUD's cooldown sweeps).
+func get_bomb_cooldown_fraction() -> float:
+	return clampf(_bomb_timer / BOMB_COOLDOWN, 0.0, 1.0)
+
+func get_laser_cooldown_fraction() -> float:
+	return clampf(_missile_timer / MISSILE_COOLDOWN, 0.0, 1.0)
+
 func _draw() -> void:
-	var color := Color(0.9, 0.7, 0.1)
-	if _damage_flash > 0.0:
-		color = Color(1, 1, 1)
-	draw_circle(Vector2.ZERO, RADIUS, color)
+	var time := Time.get_ticks_msec() / 1000.0
+	var aim := get_local_mouse_position()
+	var aim_dir := aim.normalized() if aim.length() > 1.0 else Vector2.RIGHT
+
+	# Faint auto-attack range ring: shows where the passive attack reaches.
+	draw_arc(Vector2.ZERO, attack_range, 0.0, TAU, 72, Color(UIStyle.GOLD, 0.09), 1.5)
+
+	# Bomb landing reticle: where the next left-click would land (same
+	# clamp as _throw_bomb) and how big the blast will be. Dim while on cooldown.
+	var impact := aim if aim.length() <= BOMB_MAX_RANGE else aim.normalized() * BOMB_MAX_RANGE
+	var ready_alpha := 0.34 if _bomb_timer <= 0.0 else 0.12
+	draw_arc(impact, BOMB_RADIUS, 0.0, TAU, 40, Color(UIStyle.AMBER, ready_alpha), 1.5)
+	draw_circle(impact, 2.5, Color(UIStyle.AMBER, ready_alpha + 0.15))
+
+	# Ground shadow.
+	draw_set_transform(Vector2(0, 7), 0.0, Vector2(1.0, 0.45))
+	draw_circle(Vector2.ZERO, RADIUS * 1.15, Color(0, 0, 0, 0.4))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	# Aura: soft, slowly breathing halo so the crawler reads instantly in a crowd.
+	var pulse := 0.5 + 0.5 * sin(time * 2.4)
+	draw_circle(Vector2.ZERO, RADIUS + 15.0 + 2.0 * pulse, Color(UIStyle.GOLD, 0.05))
+	draw_circle(Vector2.ZERO, RADIUS + 8.0 + 1.5 * pulse, Color(UIStyle.GOLD, 0.09))
+
+	# Carl: dark rim, gold body, lighter top-left sheen.
+	var hurt := _damage_flash > 0.0
+	var body := Color.WHITE if hurt else UIStyle.GOLD
+	draw_circle(Vector2.ZERO, RADIUS + 2.0, Color(0.1, 0.06, 0.02))
+	draw_circle(Vector2.ZERO, RADIUS, body)
+	draw_circle(Vector2(-4, -5), RADIUS * 0.6, body.lightened(0.35) if not hurt else Color.WHITE)
+	# Eyes look where the cursor is; a visor-like brow sits over them.
+	var perp := Vector2(-aim_dir.y, aim_dir.x)
+	var eye_center := aim_dir * 6.0
+	for side in [-1.0, 1.0]:
+		var eye: Vector2 = eye_center + perp * 5.0 * side
+		draw_circle(eye, 3.6, Color(0.98, 0.97, 0.92))
+		draw_circle(eye + aim_dir * 1.4, 1.8, Color(0.08, 0.06, 0.1))
+	# Aim tick just outside the body.
+	draw_line(aim_dir * (RADIUS + 5.0), aim_dir * (RADIUS + 11.0), Color(UIStyle.AMBER, 0.75), 2.5)
+
+	# Donut: tiny pink companion orbiting Carl's shoulder (same combatant, so
+	# she doesn't attack on her own — she's here to be seen).
+	var orbit := time * 1.5
+	var donut := Vector2.from_angle(orbit) * (RADIUS + 12.0) + Vector2(0, sin(time * 5.0) * 2.0)
+	draw_circle(donut + Vector2(0, 3), 7.5, Color(0, 0, 0, 0.25))
+	draw_colored_polygon(PackedVector2Array([donut + Vector2(-7, -3), donut + Vector2(-5, -11), donut + Vector2(-1, -6)]), UIStyle.PINK.darkened(0.15))
+	draw_colored_polygon(PackedVector2Array([donut + Vector2(7, -3), donut + Vector2(5, -11), donut + Vector2(1, -6)]), UIStyle.PINK.darkened(0.15))
+	draw_circle(donut, 7.5, Color(0.25, 0.08, 0.16))
+	draw_circle(donut, 6.2, UIStyle.PINK if not hurt else Color.WHITE)
+	draw_circle(donut + Vector2(-2.3, -0.5), 1.2, Color(0.15, 0.05, 0.1))
+	draw_circle(donut + Vector2(2.3, -0.5), 1.2, Color(0.15, 0.05, 0.1))
+	draw_circle(donut + Vector2(0, -6.6), 1.5, UIStyle.GOLD)  # tiara jewel
+
+	# Auto-attack beam with a glow and an impact flash.
 	if _attack_flash_timer > 0.0:
-		draw_line(Vector2.ZERO, _attack_flash_target, Color(1, 1, 0, 0.6), 2.0)
+		var k := _attack_flash_timer / 0.1
+		draw_line(Vector2.ZERO, _attack_flash_target, Color(UIStyle.GOLD, 0.22 * k), 7.0)
+		draw_line(Vector2.ZERO, _attack_flash_target, Color(1, 0.95, 0.6, 0.85 * k), 2.0)
+		draw_circle(_attack_flash_target, 4.0 + 6.0 * (1.0 - k), Color(1, 0.9, 0.5, 0.5 * k))
 
 func take_damage(amount: float) -> void:
 	hp -= amount
 	_damage_flash = 0.15
 	hp_changed.emit(hp, max_hp)
+	var fx := FxLayer.of(self)
+	if fx:
+		fx.sparks(global_position, UIStyle.HP_RED, 5, 150.0, 10.0)
+		fx.shake(2.2)
 	if hp <= 0.0:
+		if fx:
+			fx.burst(global_position, UIStyle.GOLD, 26, 260.0, 4.0, 0.8)
+			fx.ring(global_position, UIStyle.GOLD, RADIUS, 110.0, 0.7, 4.0)
+			fx.shake(9.0)
 		died.emit()
 
 func reset_floor_stats() -> void:

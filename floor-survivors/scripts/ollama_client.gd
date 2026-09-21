@@ -13,6 +13,11 @@ const MODEL := "llama3.2:latest"
 # memory (measured); a warm call is well under 1s. 6s gives the cold case a
 # fair shot without risking a real stall.
 const DEFAULT_TIMEOUT_SEC := 6.0
+# The live director is called back-to-back, so it gets a tighter budget than
+# the once-per-floor calls: a plan that arrives after its beats are already
+# over is worthless. Measured 2-4s per 6-beat plan on the dev machine (GPU).
+const DIRECTOR_TIMEOUT_SEC := 5.0
+const DIRECTOR_MAX_TOKENS := 500
 
 ## `achievement` (optional): {"title", "description", "tone"} — when given, the
 ## loot is generated to thematically tie into it (loot is now achievement-
@@ -162,6 +167,65 @@ func get_curator_update(context: Dictionary, previous_profile: Dictionary) -> Di
 		"result": result,
 	})
 	return result
+
+## Live "director" pass (see SystemDirector): a compact call, made back-to-back
+## for the whole floor, that returns a plan of per-second tactical beats for the
+## next few seconds. Returns [] on any failure — the director then just keeps
+## playing what it has and eventually falls back to the curator's standing
+## numbers, so there's no local "fallback content" here either.
+func get_director_plan(context: Dictionary, profile: Dictionary) -> Array:
+	var prompt := _build_director_prompt(context, profile)
+	var raw: Variant = await _request_json(prompt, DIRECTOR_TIMEOUT_SEC, {"num_predict": DIRECTOR_MAX_TOKENS})
+	var plan := DirectorGenerator.validate_plan(raw)
+	var source := "llm"
+	if raw == null:
+		source = "fallback_no_response"
+	elif plan.is_empty():
+		source = "fallback_invalid"
+
+	# The prompt is templated from `context` + the profile, so it's left out of
+	# the log (this fires every few seconds) — the context is enough to rebuild it.
+	ContentLogger.log_event({
+		"kind": "director",
+		"context": context,
+		"raw_response": raw,
+		"source": source,
+		"result": plan,
+	})
+	return plan
+
+## Director prompt: deliberately much smaller than the curator's (this is on
+## the latency-critical path — one call per few seconds), and only asks for the
+## five per-second numbers. The standing strategy comes from the curator's
+## ai_approach; the moment-to-moment pacing is the model's own.
+func _build_director_prompt(context: Dictionary, profile: Dictionary) -> String:
+	var beats: int = DirectorGenerator.BEAT_COUNT
+	var approach: String = str(profile.get("ai_approach", ""))
+	if approach == "":
+		approach = "none chosen yet — improvise"
+	var previous_beat: String = str(context.get("previous_beat", ""))
+	if previous_beat == "":
+		previous_beat = "none yet (this is the start of the floor)"
+
+	var lines := PackedStringArray([
+		"You are the System AI directing a live fight in a dark-comedy sci-fi dungeon crawler (Dungeon Crawler Carl-inspired) — a sadistic reality-show intelligence that finds Carl and Donut's suffering entertaining. You steer the fight one SECOND at a time: output a plan for the next %d seconds, exactly %d beats, one per second. Your numbers are applied directly (after safety clamping), so commit to them." % [beats, beats],
+		"",
+		"Your standing strategy this run: %s" % approach,
+		"Live state: floor %d, %d seconds left. HP %d/%d. %d enemies alive%s." % [context.get("floor", 1), int(context.get("seconds_left", 0.0)), int(context.get("hp", 0.0)), int(context.get("max_hp", 0.0)), context.get("enemies", 0), ", a boss is on the field" if context.get("bosses", 0) > 0 else ", no boss"],
+		"Since your last look (%.0fs ago): they took %d damage, scored %d points, threw %d bombs, cast %d laser bolts, moved %d px." % [context.get("window_sec", 0.0), int(context.get("damage_delta", 0.0)), context.get("points_delta", 0), context.get("bombs_delta", 0), context.get("missiles_delta", 0), int(context.get("distance_delta", 0.0))],
+		"The last beat you played: %s" % previous_beat,
+		"",
+		"Each beat sets these numbers (neutral: dodge chances 0.0, multipliers 1.0):",
+		"- bomb_dodge_chance 0.0-0.6 (enemies dodge bombs)",
+		"- missile_dodge_chance 0.0-0.6 (enemies dodge lasers)",
+		"- spawn_interval_multiplier 0.3-1.0 (lower = enemies spawn faster)",
+		"- spawn_radius_multiplier 0.3-1.0 (lower = enemies appear closer)",
+		"- aggression_multiplier 1.0-1.6 (enemy speed and damage)",
+		"Push only one or two numbers per beat away from neutral. Direct the pacing across the %d seconds — build pressure, spike, ease off, feint — you are a showrunner, not a thermostat. If they're near death you may sadistically ease off to prolong it, or finish them; your call." % beats,
+		"",
+		"Respond with ONLY a JSON object: {\"beats\": [{\"tactic\": \"none\"|\"ambush\"|\"swarm\"|\"counter_bomb\"|\"counter_laser\"|\"aggression\", \"bomb_dodge_chance\": number, \"missile_dodge_chance\": number, \"spawn_interval_multiplier\": number, \"spawn_radius_multiplier\": number, \"aggression_multiplier\": number}, ... %d beats]}" % beats,
+	])
+	return "\n".join(lines)
 
 func _build_loot_prompt(tier: String, context: Dictionary, profile: Dictionary = {}, achievement: Variant = null) -> String:
 	var floor_num: int = context.get("floor", 1)
@@ -313,17 +377,20 @@ func _build_curator_prompt(context: Dictionary, previous_profile: Dictionary) ->
 ## POSTs to Ollama with format=json and races the response against a timeout.
 ## Returns the parsed inner JSON (the model's actual output) on success, or
 ## null on any failure (HTTP error, timeout, malformed JSON at either layer).
-func _request_json(prompt: String, timeout_sec: float) -> Variant:
+func _request_json(prompt: String, timeout_sec: float, options: Dictionary = {}) -> Variant:
 	var http := HTTPRequest.new()
 	http.process_mode = Node.PROCESS_MODE_ALWAYS  # keep polling even if the tree is paused
 	add_child(http)
 
-	var body := JSON.stringify({
+	var payload := {
 		"model": MODEL,
 		"prompt": prompt,
 		"format": "json",
 		"stream": false,
-	})
+	}
+	if not options.is_empty():
+		payload["options"] = options  # Ollama model options, e.g. {"num_predict": N}
+	var body := JSON.stringify(payload)
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	var err := http.request(OLLAMA_URL, headers, HTTPClient.METHOD_POST, body)
 	if err != OK:

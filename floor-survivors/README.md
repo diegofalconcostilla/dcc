@@ -1,4 +1,6 @@
-# DCC
+# DCC: Floor Survivors
+
+The first game in the [DCC collection](../README.md) — everything in this folder is one self-contained Godot project.
 
 A 2D dungeon crawler prototype drawing on the setting/tone of Matt Dinniman's *Dungeon Crawler Carl*: survivors ("crawlers") fight down through a multi-level "World Dungeon," broadcast as an intergalactic reality show.
 
@@ -19,6 +21,9 @@ See [`plan.md`](plan.md) for the full design notes and decision log.
 - 10 sequential floors, 90 seconds each — clear a floor by surviving the timer; monster speed ramps up each floor and within it.
 - **Loot is achievement-gated:** at floor-end, an LLM call decides whether the run earned an achievement (deliberately selective — most floors won't). Only if one is earned does a loot box open, and its contents are generated to thematically tie into that achievement — no achievement, no loot.
 - **The System AI:** twice per floor (halfway through the timer, and at floor-end), an LLM call updates a running character profile of your playstyle *and* picks a live tactic against you — enemy dodge chance per ability, spawn rate/distance, aggression, or boss timing are all numbers it sets itself, clamped into safe ranges but never computed by a formula. It'll sometimes leave a gloating one-liner as a toast.
+- **A live director:** on top of the twice-per-floor profile, the System AI steers the fight *every second* — a compact LLM call returns a plan of per-second beats (tactic + numbers), prefetched so plans chain without gaps; the HUD shows its current move. Falls back to the profile's standing numbers if Ollama is slow or down.
+- **Adaptive 8-bit music:** five layered loop stems (synthesized by `tools/make_chiptune.py`, no external assets) fade in and out with the System AI's live threat, enemy count, boss presence and your HP, plus stingers for level-ups, bosses, floor clear and game over. `M` mutes.
+- Starts fullscreen; `F11` toggles a window. The view is pinned to 1152x648 and scaled, so fullscreen shows the same slice of the world.
 - A local hand-written fallback covers loot/achievements if Ollama is slow or unavailable — gameplay never blocks waiting on the model.
 
 ## Running it
@@ -30,7 +35,7 @@ See [`plan.md`](plan.md) for the full design notes and decision log.
    godot --path .
    ```
 
-On Windows, if Godot was installed via `winget` (not on `PATH` by default) and you want Ollama started for you automatically, use `run_game.bat` in the repo root instead — it boots `ollama serve` if it isn't already running, refreshes Godot's script class cache, then launches the game.
+On Windows, if Godot was installed via `winget` (not on `PATH` by default) and you want Ollama started for you automatically, use `run_game.bat` in this folder instead — it boots `ollama serve` if it isn't already running, refreshes Godot's script class cache, then launches the game.
 
 For fast iteration on the floor-end/System AI flow, override the floor timer with an environment variable so floors clear in seconds instead of minutes:
 

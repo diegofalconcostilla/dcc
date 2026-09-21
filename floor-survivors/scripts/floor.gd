@@ -10,6 +10,8 @@ var player: Player
 var hud: GameHud
 var spawner: EnemySpawner
 var ollama: OllamaClient
+var background: BackgroundGrid
+var overlay: ScreenOverlay
 
 var floor_duration := DEFAULT_FLOOR_DURATION
 var current_floor := 1
@@ -23,19 +25,45 @@ var floor_active := true
 # section. Fixed-shape, replaced (not appended to) twice per floor: once at
 # the timer's halfway point, once at floor-end.
 var character_profile := CuratorGenerator.DEFAULT_PROFILE.duplicate(true)
+var _last_hp := 100.0  # presentation only: lets the hit flash tell damage from healing
 var _mid_floor_curator_done := false
 var _curator_busy := false
+
+# The System AI's live per-second hand on the fight, layered over the curator's
+# standing numbers (see get_effective_profile).
+var director: SystemDirector
 
 func _ready() -> void:
 	floor_duration = _resolve_floor_duration()
 	time_remaining = floor_duration
 	add_to_group("floor_controller")
-	add_child(BackgroundGrid.new())
+	background = BackgroundGrid.new()
+	add_child(background)
+	add_child(FxLayer.new())
+	overlay = ScreenOverlay.new()
+	add_child(overlay)
 	ollama = OllamaClient.new()
 	add_child(ollama)
 	_spawn_player()
 	_spawn_hud()
 	_spawn_enemy_spawner()
+	director = SystemDirector.new()
+	director.floor_node = self  # set before add_child so its _ready can read the profile
+	add_child(director)
+	hud.show_floor_banner(current_floor, MAX_FLOOR)
+	# Testing hook (see DebugCapture): only active when DCC_CAPTURE_DIR is set.
+	if OS.get_environment("DCC_CAPTURE_DIR") != "":
+		add_child(DebugCapture.new())
+
+## The tactical numbers actually in force: the curator's profile (twice per
+## floor) with the director's live per-second numbers merged over the top.
+## Player (dodge chances) and EnemySpawner (spawn/aggression) read this, not
+## character_profile directly.
+func get_effective_profile() -> Dictionary:
+	var effective := character_profile.duplicate()
+	if director:
+		effective.merge(director.live, true)
+	return effective
 
 ## Testing hook: set env var DCC_FLOOR_DURATION (e.g. "3") to shorten floors
 ## for quickly exercising the floor-clear -> loot/achievement flow and its logs,
@@ -51,6 +79,12 @@ func _process(delta: float) -> void:
 		return
 	time_remaining = max(0.0, time_remaining - delta)
 	hud.update_timer(time_remaining)
+	if spawner:
+		spawner.apply_profile(get_effective_profile())  # idempotent; keeps the director's per-second numbers live
+	hud.update_system_tactic(director.current_tactic if director else "none", spawner.get_aggression() if spawner else 1.0)
+	hud.update_abilities(player.get_bomb_cooldown_fraction(), player.get_laser_cooldown_fraction())
+	var boss := get_tree().get_first_node_in_group("bosses") as Boss
+	hud.update_boss(clampf(boss.hp / boss.max_hp, 0.0, 1.0) if is_instance_valid(boss) else -1.0)
 	if not _mid_floor_curator_done and time_remaining <= floor_duration / 2.0:
 		_mid_floor_curator_done = true
 		_run_mid_floor_curator()
@@ -81,10 +115,10 @@ func _run_mid_floor_curator() -> void:
 ## created so a new floor doesn't silently reset to a neutral tactic).
 func _apply_curator_profile() -> void:
 	if spawner:
-		spawner.apply_profile(character_profile)
+		spawner.apply_profile(get_effective_profile())
 	var commentary: String = character_profile.get("ai_commentary", "")
 	if commentary != "":
-		hud.show_toast("System AI: %s" % commentary)
+		hud.show_toast(commentary, "system", 4.5)
 		# Give the taunt a moment on screen before anything else can overwrite
 		# it (floor-end otherwise moves straight into the next floor's toast).
 		await get_tree().create_timer(2.5).timeout
@@ -120,16 +154,25 @@ func _spawn_enemy_spawner() -> void:
 	spawner.enemy_died.connect(_on_enemy_died)
 	spawner.boss_spawned.connect(_on_boss_spawned)
 	spawner.boss_died.connect(_on_boss_died)
-	spawner.apply_profile(character_profile)  # carry the System AI's current tactic into the new floor
+	spawner.apply_profile(get_effective_profile())  # carry the System AI's current tactic into the new floor
 
 func _on_player_hp_changed(current: float, max_hp: float) -> void:
+	if current < _last_hp:
+		overlay.pulse_hit(clampf((_last_hp - current) / 20.0, 0.35, 1.0))  # bigger hit, bigger flash
+	_last_hp = current
 	hud.update_hp(current, max_hp)
+	overlay.set_hp(current, max_hp)
 
 func _on_player_xp_changed(current: float, needed: float) -> void:
 	hud.update_xp(current, needed)
 
 func _on_player_leveled_up(level: int) -> void:
 	hud.update_level(level)
+	hud.show_level_up(level)
+	var fx := FxLayer.of(self)
+	if fx:
+		fx.ring(player.global_position, UIStyle.MINT, Player.RADIUS, 120.0, 0.6, 4.0)
+		fx.burst(player.global_position, UIStyle.MINT, 14, 200.0, 3.0, 0.6)
 	player.apply_level_up_bonus()
 
 func _on_enemy_died(point_value: int, _death_position: Vector2) -> void:
@@ -138,10 +181,13 @@ func _on_enemy_died(point_value: int, _death_position: Vector2) -> void:
 	hud.update_points(total_points)
 
 func _on_boss_spawned() -> void:
-	hud.show_toast("A boss has appeared!")
+	hud.show_banner("BOSS APPROACHING", "Something large has noticed you.", UIStyle.BOSS_PURPLE, 2.4)
+	var fx := FxLayer.of(self)
+	if fx:
+		fx.shake(5.0)
 
 func _on_boss_died(point_value: int, death_position: Vector2) -> void:
-	hud.show_toast("Boss defeated! +%d points" % point_value)
+	hud.show_toast("+%d points" % point_value, "boss", 3.5, Color.TRANSPARENT, "Boss defeated")
 	_on_enemy_died(point_value, death_position)
 
 func register_damage_taken(amount: float) -> void:
@@ -155,6 +201,7 @@ func _end_floor(outcome: String) -> void:
 		return
 	floor_active = false
 	get_tree().paused = true
+	hud.show_floor_end(outcome)
 
 	var floor_end_context := {
 		"floor": current_floor,
@@ -166,11 +213,13 @@ func _end_floor(outcome: String) -> void:
 		"missiles_cast": player.floor_missiles_cast,
 	}
 
+	var run_over_note := ""  # the LLM's game-over line, shown on the run-over card
 	if outcome == "collapsed":
 		# Character died: no achievements, no loot — just a narrated end to
 		# the run (see OllamaClient.get_game_over_message).
 		var death_message: String = await ollama.get_game_over_message(floor_end_context, character_profile)
-		hud.show_toast(death_message)
+		hud.show_toast(death_message, "death", 6.0)
+		run_over_note = death_message
 		print("Floor %d ended: outcome=collapsed. %s" % [current_floor, death_message])
 		await get_tree().create_timer(3.5).timeout
 	else:
@@ -183,19 +232,19 @@ func _end_floor(outcome: String) -> void:
 		if result.get("earned", false):
 			var achievement: Dictionary = result["achievement"]
 			await get_tree().create_timer(3.5).timeout
-			hud.show_toast("Achievement unlocked: %s — %s" % [achievement["title"], achievement["description"]])
+			hud.show_toast(achievement["description"], "achievement", 6.0, Color.TRANSPARENT, achievement["title"])
 			print("Achievement: %s" % achievement)
 			await get_tree().create_timer(3.5).timeout
 
 			var tier := LootGenerator.compute_tier(current_floor, floor_points, floor_damage_taken, character_profile.get("loot_generosity_multiplier", 1.0))
-			hud.show_toast("Opening [%s] loot box..." % tier.to_upper())
+			hud.show_toast("", "loot", 4.0, UIStyle.tier_color(tier), "Opening %s loot box..." % tier.to_upper())
 			var loot: Dictionary = await ollama.get_loot(tier, {
 				"floor": current_floor,
 				"points_this_floor": floor_points,
 				"damage_taken_this_floor": floor_damage_taken,
 			}, character_profile, achievement)
 			player.apply_loot(loot)
-			hud.show_toast("Loot: [%s] %s — %s" % [tier.to_upper(), loot["name"], loot["flavor_text"]])
+			hud.show_toast(loot["flavor_text"], "loot", 7.0, UIStyle.tier_color(tier), "%s  [%s]" % [loot["name"], tier.to_upper()])
 			print("Floor %d ended: outcome=%s tier=%s loot=%s achievement=%s" % [current_floor, outcome, tier, loot, achievement["title"]])
 			await get_tree().create_timer(3.0).timeout
 		else:
@@ -231,7 +280,7 @@ func _end_floor(outcome: String) -> void:
 			final_text = "Run complete! Cleared all %d floors with %d points." % [MAX_FLOOR, total_points]
 		else:
 			final_text = "Run over on floor %d. Final score: %d points." % [current_floor, total_points]
-		hud.show_toast(final_text)
+		hud.show_run_over(outcome, run_over_note if run_over_note != "" else final_text, {"floor": current_floor, "points": total_points, "level": player.level})
 
 func _start_next_floor() -> void:
 	current_floor += 1
@@ -240,6 +289,7 @@ func _start_next_floor() -> void:
 	time_remaining = floor_duration
 	_mid_floor_curator_done = false
 	player.reset_floor_stats()
+	director.reset()
 
 	for node in get_tree().get_nodes_in_group("enemies"):
 		node.queue_free()
@@ -253,7 +303,8 @@ func _start_next_floor() -> void:
 	_spawn_enemy_spawner()
 
 	hud.update_floor(current_floor, MAX_FLOOR)
-	hud.show_toast("Floor %d — collapses in %d:00" % [current_floor, int(floor_duration / 60.0)])
+	hud.show_floor_banner(current_floor, MAX_FLOOR)
+	background.set_floor_theme(current_floor)
 
 	floor_active = true
 	get_tree().paused = false
