@@ -79,6 +79,7 @@ var _attack_flash_target := Vector2.ZERO
 var _attack_flash_timer := 0.0
 
 func _ready() -> void:
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST  # crisp pixel-art sprite
 	var shape := CollisionShape2D.new()
 	var circle := CircleShape2D.new()
 	circle.radius = RADIUS
@@ -235,17 +236,23 @@ func _draw() -> void:
 
 	# Carl: dark rim, gold body, lighter top-left sheen.
 	var hurt := _damage_flash > 0.0
-	var body := Color.WHITE if hurt else UIStyle.GOLD
-	draw_circle(Vector2.ZERO, RADIUS + 2.0, Color(0.1, 0.06, 0.02))
-	draw_circle(Vector2.ZERO, RADIUS, body)
-	draw_circle(Vector2(-4, -5), RADIUS * 0.6, body.lightened(0.35) if not hurt else Color.WHITE)
-	# Eyes look where the cursor is; a visor-like brow sits over them.
-	var perp := Vector2(-aim_dir.y, aim_dir.x)
-	var eye_center := aim_dir * 6.0
-	for side in [-1.0, 1.0]:
-		var eye: Vector2 = eye_center + perp * 5.0 * side
-		draw_circle(eye, 3.6, Color(0.98, 0.97, 0.92))
-		draw_circle(eye + aim_dir * 1.4, 1.8, Color(0.08, 0.06, 0.1))
+	var carl_sprite := SpriteBank.player_entry() if SpriteBank.enabled() else {}
+	if not carl_sprite.is_empty():
+		# Pixel-art Carl standing on his shadow, facing the cursor.
+		SpriteBank.draw_actor(self, carl_sprite, Vector2(0, 7), RADIUS * 2.8, velocity.length() > 5.0,
+			aim_dir.x < 0.0, Color(3.0, 3.0, 3.0) if hurt else Color.WHITE)
+	else:
+		var body := Color.WHITE if hurt else UIStyle.GOLD
+		draw_circle(Vector2.ZERO, RADIUS + 2.0, Color(0.1, 0.06, 0.02))
+		draw_circle(Vector2.ZERO, RADIUS, body)
+		draw_circle(Vector2(-4, -5), RADIUS * 0.6, body.lightened(0.35) if not hurt else Color.WHITE)
+		# Eyes look where the cursor is; a visor-like brow sits over them.
+		var perp := Vector2(-aim_dir.y, aim_dir.x)
+		var eye_center := aim_dir * 6.0
+		for side in [-1.0, 1.0]:
+			var eye: Vector2 = eye_center + perp * 5.0 * side
+			draw_circle(eye, 3.6, Color(0.98, 0.97, 0.92))
+			draw_circle(eye + aim_dir * 1.4, 1.8, Color(0.08, 0.06, 0.1))
 	# Aim tick just outside the body.
 	draw_line(aim_dir * (RADIUS + 5.0), aim_dir * (RADIUS + 11.0), Color(UIStyle.AMBER, 0.75), 2.5)
 
@@ -253,14 +260,23 @@ func _draw() -> void:
 	# she doesn't attack on her own — she's here to be seen).
 	var orbit := time * 1.5
 	var donut := Vector2.from_angle(orbit) * (RADIUS + 12.0) + Vector2(0, sin(time * 5.0) * 2.0)
-	draw_circle(donut + Vector2(0, 3), 7.5, Color(0, 0, 0, 0.25))
-	draw_colored_polygon(PackedVector2Array([donut + Vector2(-7, -3), donut + Vector2(-5, -11), donut + Vector2(-1, -6)]), UIStyle.PINK.darkened(0.15))
-	draw_colored_polygon(PackedVector2Array([donut + Vector2(7, -3), donut + Vector2(5, -11), donut + Vector2(1, -6)]), UIStyle.PINK.darkened(0.15))
-	draw_circle(donut, 7.5, Color(0.25, 0.08, 0.16))
-	draw_circle(donut, 6.2, UIStyle.PINK if not hurt else Color.WHITE)
-	draw_circle(donut + Vector2(-2.3, -0.5), 1.2, Color(0.15, 0.05, 0.1))
-	draw_circle(donut + Vector2(2.3, -0.5), 1.2, Color(0.15, 0.05, 0.1))
-	draw_circle(donut + Vector2(0, -6.6), 1.5, UIStyle.GOLD)  # tiara jewel
+	var donut_sprite := SpriteBank.donut_entry() if SpriteBank.enabled() else {}
+	if not donut_sprite.is_empty():
+		# White Persian sprite, facing along her orbit.
+		draw_set_transform(donut + Vector2(0, 7), 0.0, Vector2(1.0, 0.4))
+		draw_circle(Vector2.ZERO, 8.0, Color(0, 0, 0, 0.25))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		SpriteBank.draw_actor(self, donut_sprite, donut + Vector2(0, 8), 22.0, false,
+			sin(orbit) > 0.0, Color(3.0, 3.0, 3.0) if hurt else Color.WHITE)
+	else:
+		draw_circle(donut + Vector2(0, 3), 7.5, Color(0, 0, 0, 0.25))
+		draw_colored_polygon(PackedVector2Array([donut + Vector2(-7, -3), donut + Vector2(-5, -11), donut + Vector2(-1, -6)]), UIStyle.PINK.darkened(0.15))
+		draw_colored_polygon(PackedVector2Array([donut + Vector2(7, -3), donut + Vector2(5, -11), donut + Vector2(1, -6)]), UIStyle.PINK.darkened(0.15))
+		draw_circle(donut, 7.5, Color(0.25, 0.08, 0.16))
+		draw_circle(donut, 6.2, UIStyle.PINK if not hurt else Color.WHITE)
+		draw_circle(donut + Vector2(-2.3, -0.5), 1.2, Color(0.15, 0.05, 0.1))
+		draw_circle(donut + Vector2(2.3, -0.5), 1.2, Color(0.15, 0.05, 0.1))
+		draw_circle(donut + Vector2(0, -6.6), 1.5, UIStyle.GOLD)  # tiara jewel
 
 	# Auto-attack beam with a glow and an impact flash.
 	if _attack_flash_timer > 0.0:

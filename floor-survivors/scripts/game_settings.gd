@@ -23,6 +23,7 @@ static var muted := false
 static var fullscreen := true    # the project starts fullscreen (project.godot)
 static var shake_scale := 1.0    # 0..SHAKE_MAX, multiplies FxLayer's camera shake
 static var llm_enabled := true   # false = never call Ollama; every AI feature uses its local fallback
+static var sprite_art := true    # false = the original code-drawn actors (SpriteBank)
 
 static var _loaded := false
 static var _dirty := false
@@ -40,6 +41,7 @@ static func load_settings() -> void:
 	fullscreen = bool(cfg.get_value("video", "fullscreen", fullscreen))
 	shake_scale = clampf(float(cfg.get_value("video", "shake_scale", shake_scale)), 0.0, SHAKE_MAX)
 	llm_enabled = bool(cfg.get_value("ai", "llm_enabled", llm_enabled))
+	sprite_art = bool(cfg.get_value("video", "sprite_art", sprite_art))
 
 static func flush() -> void:
 	if not _dirty:
@@ -52,6 +54,7 @@ static func flush() -> void:
 	cfg.set_value("video", "fullscreen", fullscreen)
 	cfg.set_value("video", "shake_scale", shake_scale)
 	cfg.set_value("ai", "llm_enabled", llm_enabled)
+	cfg.set_value("video", "sprite_art", sprite_art)
 	if cfg.save(PATH) != OK:
 		push_warning("[GameSettings] could not save %s" % PATH)
 

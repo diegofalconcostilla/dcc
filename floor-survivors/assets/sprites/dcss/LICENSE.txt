@@ -1,0 +1,2 @@
+Dungeon Crawl Stone Soup tiles - https://opengameart.org/content/dungeon-crawl-32x32-tiles - CC0 1.0 (public domain).
+carl.png is composed from its paper-doll layers by tools/build_sprite_assets.py.

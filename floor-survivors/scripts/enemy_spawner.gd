@@ -12,6 +12,7 @@ const BOSS_KILL_MIN := 15
 const BOSS_KILL_MAX := 25
 
 var floor_speed_multiplier := 1.0
+var floor_number := 1  # picks the floor's sprite roster (SpriteBank)
 var elapsed := 0.0
 var spawn_interval := 1.4
 var _timer := 0.0
@@ -67,6 +68,7 @@ func _spawn_enemy() -> void:
 	var angle := randf() * TAU
 	var spawn_radius := 500.0 * _spawn_radius_mult
 	enemy.position = player.global_position + Vector2(cos(angle), sin(angle)) * spawn_radius
+	enemy.sprite_entry = SpriteBank.enemy_entry(floor_number)
 	var difficulty_factor := 1.0 + elapsed / 60.0
 	get_parent().add_child(enemy)
 	enemy.scale_difficulty(difficulty_factor)
@@ -83,6 +85,7 @@ func _spawn_boss() -> void:
 	var boss := Boss.new()
 	var angle := randf() * TAU
 	boss.position = player.global_position + Vector2(cos(angle), sin(angle)) * (500.0 * _spawn_radius_mult)
+	boss.sprite_entry = SpriteBank.boss_entry(floor_number)
 	var difficulty_factor := 1.0 + elapsed / 60.0
 	get_parent().add_child(boss)
 	boss.scale_difficulty(difficulty_factor)

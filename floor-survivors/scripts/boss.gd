@@ -53,6 +53,14 @@ func _draw() -> void:
 	# Health ring, starting at the top and draining clockwise.
 	draw_arc(Vector2.ZERO, radius + 7.0, 0.0, TAU, 48, Color(0, 0, 0, 0.55), 5.0)
 	draw_arc(Vector2.ZERO, radius + 7.0, -PI / 2.0, -PI / 2.0 + TAU * t, 48, Color(0.95, 0.2, 0.3), 4.0)
+	if _uses_sprite():
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		var heat := clampf((_aggression_visual - 1.0) / 0.6, 0.0, 1.0)
+		_draw_sprite(flashing, heat, radius * SPRITE_HEIGHT_RADII)
+		if _dodge_timer > 0.0:
+			draw_arc(Vector2.ZERO, radius + 10.0, time * 8.0, time * 8.0 + TAU * 0.75, 28, Color(UIStyle.CYAN, 0.85), 3.0)
+		return
+
 	# Slow-turning horns (over the ring).
 	draw_set_transform(Vector2.ZERO, time * 0.35, Vector2.ONE)
 	draw_multiline(_spikes, Color(0.08, 0.02, 0.1), 9.0)

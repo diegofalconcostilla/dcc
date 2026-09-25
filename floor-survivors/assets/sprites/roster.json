@@ -1,0 +1,570 @@
+{
+ "player": {
+  "id": "carl",
+  "idle": [
+   "res://assets/sprites/dcss/carl.png"
+  ],
+  "run": [
+   "res://assets/sprites/dcss/carl.png"
+  ]
+ },
+ "donut": {
+  "id": "donut",
+  "idle": [
+   "res://assets/sprites/dcss/donut.png"
+  ],
+  "run": [
+   "res://assets/sprites/dcss/donut.png"
+  ]
+ },
+ "floors": [
+  {
+   "enemies": [
+    {
+     "id": "0x72__goblin",
+     "name": "Grinny Goblin",
+     "idle": [
+      "res://assets/sprites/0x72/goblin/idle_0.png",
+      "res://assets/sprites/0x72/goblin/idle_1.png",
+      "res://assets/sprites/0x72/goblin/idle_2.png",
+      "res://assets/sprites/0x72/goblin/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/goblin/run_0.png",
+      "res://assets/sprites/0x72/goblin/run_1.png",
+      "res://assets/sprites/0x72/goblin/run_2.png",
+      "res://assets/sprites/0x72/goblin/run_3.png"
+     ]
+    },
+    {
+     "id": "dcss__animals__rat",
+     "name": "Tutorial Rat",
+     "idle": [
+      "res://assets/sprites/dcss/animals__rat.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/animals__rat.png"
+     ]
+    },
+    {
+     "id": "dcss__animals__giant_cockroach_new",
+     "name": "Cockroach Intern",
+     "idle": [
+      "res://assets/sprites/dcss/animals__giant_cockroach_new.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/animals__giant_cockroach_new.png"
+     ]
+    }
+   ],
+   "boss": {
+    "id": "0x72__ogre",
+    "name": "The Hall Monitor",
+    "idle": [
+     "res://assets/sprites/0x72/ogre/idle_0.png",
+     "res://assets/sprites/0x72/ogre/idle_1.png",
+     "res://assets/sprites/0x72/ogre/idle_2.png",
+     "res://assets/sprites/0x72/ogre/idle_3.png"
+    ],
+    "run": [
+     "res://assets/sprites/0x72/ogre/run_0.png",
+     "res://assets/sprites/0x72/ogre/run_1.png",
+     "res://assets/sprites/0x72/ogre/run_2.png",
+     "res://assets/sprites/0x72/ogre/run_3.png"
+    ]
+   }
+  },
+  {
+   "enemies": [
+    {
+     "id": "0x72__swampy",
+     "name": "Swampy Snob",
+     "idle": [
+      "res://assets/sprites/0x72/swampy/idle_0.png",
+      "res://assets/sprites/0x72/swampy/idle_1.png",
+      "res://assets/sprites/0x72/swampy/idle_2.png",
+      "res://assets/sprites/0x72/swampy/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/swampy/run_0.png",
+      "res://assets/sprites/0x72/swampy/run_1.png",
+      "res://assets/sprites/0x72/swampy/run_2.png",
+      "res://assets/sprites/0x72/swampy/run_3.png"
+     ]
+    },
+    {
+     "id": "0x72__muddy",
+     "name": "Sewer Mud Guy",
+     "idle": [
+      "res://assets/sprites/0x72/muddy/idle_0.png",
+      "res://assets/sprites/0x72/muddy/idle_1.png",
+      "res://assets/sprites/0x72/muddy/idle_2.png",
+      "res://assets/sprites/0x72/muddy/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/muddy/run_0.png",
+      "res://assets/sprites/0x72/muddy/run_1.png",
+      "res://assets/sprites/0x72/muddy/run_2.png",
+      "res://assets/sprites/0x72/muddy/run_3.png"
+     ]
+    },
+    {
+     "id": "dcss__amorphous__acid_blob",
+     "name": "Acid Reflux",
+     "idle": [
+      "res://assets/sprites/dcss/amorphous__acid_blob.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/amorphous__acid_blob.png"
+     ]
+    }
+   ],
+   "boss": {
+    "id": "0x72__big_zombie",
+    "name": "Zomby McZombinator",
+    "idle": [
+     "res://assets/sprites/0x72/big_zombie/idle_0.png",
+     "res://assets/sprites/0x72/big_zombie/idle_1.png",
+     "res://assets/sprites/0x72/big_zombie/idle_2.png",
+     "res://assets/sprites/0x72/big_zombie/idle_3.png"
+    ],
+    "run": [
+     "res://assets/sprites/0x72/big_zombie/run_0.png",
+     "res://assets/sprites/0x72/big_zombie/run_1.png",
+     "res://assets/sprites/0x72/big_zombie/run_2.png",
+     "res://assets/sprites/0x72/big_zombie/run_3.png"
+    ]
+   }
+  },
+  {
+   "enemies": [
+    {
+     "id": "0x72__orc_warrior",
+     "name": "Orcy Oaf",
+     "idle": [
+      "res://assets/sprites/0x72/orc_warrior/idle_0.png",
+      "res://assets/sprites/0x72/orc_warrior/idle_1.png",
+      "res://assets/sprites/0x72/orc_warrior/idle_2.png",
+      "res://assets/sprites/0x72/orc_warrior/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/orc_warrior/run_0.png",
+      "res://assets/sprites/0x72/orc_warrior/run_1.png",
+      "res://assets/sprites/0x72/orc_warrior/run_2.png",
+      "res://assets/sprites/0x72/orc_warrior/run_3.png"
+     ]
+    },
+    {
+     "id": "0x72__masked_orc",
+     "name": "Masked Muncher",
+     "idle": [
+      "res://assets/sprites/0x72/masked_orc/idle_0.png",
+      "res://assets/sprites/0x72/masked_orc/idle_1.png",
+      "res://assets/sprites/0x72/masked_orc/idle_2.png",
+      "res://assets/sprites/0x72/masked_orc/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/masked_orc/run_0.png",
+      "res://assets/sprites/0x72/masked_orc/run_1.png",
+      "res://assets/sprites/0x72/masked_orc/run_2.png",
+      "res://assets/sprites/0x72/masked_orc/run_3.png"
+     ]
+    },
+    {
+     "id": "dcss__deep_dwarf_berserker",
+     "name": "Dwarf on Overtime",
+     "idle": [
+      "res://assets/sprites/dcss/deep_dwarf_berserker.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/deep_dwarf_berserker.png"
+     ]
+    }
+   ],
+   "boss": {
+    "id": "dcss__iron_troll_monk_ghost",
+    "name": "Greedy Grotto",
+    "idle": [
+     "res://assets/sprites/dcss/iron_troll_monk_ghost.png"
+    ],
+    "run": [
+     "res://assets/sprites/dcss/iron_troll_monk_ghost.png"
+    ]
+   }
+  },
+  {
+   "enemies": [
+    {
+     "id": "dcss__fungi_plants__wandering_mushroom_new",
+     "name": "Fun Guy",
+     "idle": [
+      "res://assets/sprites/dcss/fungi_plants__wandering_mushroom_new.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/fungi_plants__wandering_mushroom_new.png"
+     ]
+    },
+    {
+     "id": "dcss__fungi_plants__deathcap",
+     "name": "Deathcap Dave",
+     "idle": [
+      "res://assets/sprites/dcss/fungi_plants__deathcap.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/fungi_plants__deathcap.png"
+     ]
+    },
+    {
+     "id": "0x72__slug",
+     "name": "Squishy Squirt",
+     "idle": [
+      "res://assets/sprites/0x72/slug/idle_0.png",
+      "res://assets/sprites/0x72/slug/idle_1.png",
+      "res://assets/sprites/0x72/slug/idle_2.png",
+      "res://assets/sprites/0x72/slug/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/slug/run_0.png",
+      "res://assets/sprites/0x72/slug/run_1.png",
+      "res://assets/sprites/0x72/slug/run_2.png",
+      "res://assets/sprites/0x72/slug/run_3.png"
+     ]
+    }
+   ],
+   "boss": {
+    "id": "dcss__fungi_plants__hyperactive_ballistomycete",
+    "name": "Hyperactive Ballistomycete",
+    "idle": [
+     "res://assets/sprites/dcss/fungi_plants__hyperactive_ballistomycete.png"
+    ],
+    "run": [
+     "res://assets/sprites/dcss/fungi_plants__hyperactive_ballistomycete.png"
+    ]
+   }
+  },
+  {
+   "enemies": [
+    {
+     "id": "0x72__chort",
+     "name": "Chortle Chuckle",
+     "idle": [
+      "res://assets/sprites/0x72/chort/idle_0.png",
+      "res://assets/sprites/0x72/chort/idle_1.png",
+      "res://assets/sprites/0x72/chort/idle_2.png",
+      "res://assets/sprites/0x72/chort/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/chort/run_0.png",
+      "res://assets/sprites/0x72/chort/run_1.png",
+      "res://assets/sprites/0x72/chort/run_2.png",
+      "res://assets/sprites/0x72/chort/run_3.png"
+     ]
+    },
+    {
+     "id": "0x72__imp",
+     "name": "Bottle-Service Imp",
+     "idle": [
+      "res://assets/sprites/0x72/imp/idle_0.png",
+      "res://assets/sprites/0x72/imp/idle_1.png",
+      "res://assets/sprites/0x72/imp/idle_2.png",
+      "res://assets/sprites/0x72/imp/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/imp/run_0.png",
+      "res://assets/sprites/0x72/imp/run_1.png",
+      "res://assets/sprites/0x72/imp/run_2.png",
+      "res://assets/sprites/0x72/imp/run_3.png"
+     ]
+    },
+    {
+     "id": "dcss__demons__quasit_new",
+     "name": "Quasit Promoter",
+     "idle": [
+      "res://assets/sprites/dcss/demons__quasit_new.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/demons__quasit_new.png"
+     ]
+    }
+   ],
+   "boss": {
+    "id": "0x72__big_demon",
+    "name": "Demon Decadence",
+    "idle": [
+     "res://assets/sprites/0x72/big_demon/idle_0.png",
+     "res://assets/sprites/0x72/big_demon/idle_1.png",
+     "res://assets/sprites/0x72/big_demon/idle_2.png",
+     "res://assets/sprites/0x72/big_demon/idle_3.png"
+    ],
+    "run": [
+     "res://assets/sprites/0x72/big_demon/run_0.png",
+     "res://assets/sprites/0x72/big_demon/run_1.png",
+     "res://assets/sprites/0x72/big_demon/run_2.png",
+     "res://assets/sprites/0x72/big_demon/run_3.png"
+    ]
+   }
+  },
+  {
+   "enemies": [
+    {
+     "id": "dcss__salamander_firebrand",
+     "name": "Flame Fin",
+     "idle": [
+      "res://assets/sprites/dcss/salamander_firebrand.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/salamander_firebrand.png"
+     ]
+    },
+    {
+     "id": "dcss__animals__hell_hound_new",
+     "name": "Flame Fuzz",
+     "idle": [
+      "res://assets/sprites/dcss/animals__hell_hound_new.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/animals__hell_hound_new.png"
+     ]
+    },
+    {
+     "id": "dcss__lava_worm",
+     "name": "Lava Lamp Worm",
+     "idle": [
+      "res://assets/sprites/dcss/lava_worm.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/lava_worm.png"
+     ]
+    }
+   ],
+   "boss": {
+    "id": "dcss__fire_giant_new",
+    "name": "Flame Fart",
+    "idle": [
+     "res://assets/sprites/dcss/fire_giant_new.png"
+    ],
+    "run": [
+     "res://assets/sprites/dcss/fire_giant_new.png"
+    ]
+   }
+  },
+  {
+   "enemies": [
+    {
+     "id": "dcss__undead__vampire_knight_new",
+     "name": "Overdraft Knight",
+     "idle": [
+      "res://assets/sprites/dcss/undead__vampire_knight_new.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/undead__vampire_knight_new.png"
+     ]
+    },
+    {
+     "id": "dcss__animals__bat",
+     "name": "Late-Fee Bat",
+     "idle": [
+      "res://assets/sprites/dcss/animals__bat.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/animals__bat.png"
+     ]
+    },
+    {
+     "id": "dcss__undead__vampire_mage_new",
+     "name": "Vampy Vixen",
+     "idle": [
+      "res://assets/sprites/dcss/undead__vampire_mage_new.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/undead__vampire_mage_new.png"
+     ]
+    }
+   ],
+   "boss": {
+    "id": "0x72__big_demon",
+    "name": "The Loan Officer",
+    "idle": [
+     "res://assets/sprites/0x72/big_demon/idle_0.png",
+     "res://assets/sprites/0x72/big_demon/idle_1.png",
+     "res://assets/sprites/0x72/big_demon/idle_2.png",
+     "res://assets/sprites/0x72/big_demon/idle_3.png"
+    ],
+    "run": [
+     "res://assets/sprites/0x72/big_demon/run_0.png",
+     "res://assets/sprites/0x72/big_demon/run_1.png",
+     "res://assets/sprites/0x72/big_demon/run_2.png",
+     "res://assets/sprites/0x72/big_demon/run_3.png"
+    ]
+   }
+  },
+  {
+   "enemies": [
+    {
+     "id": "0x72__ice_zombie",
+     "name": "Cold Clod",
+     "idle": [
+      "res://assets/sprites/0x72/ice_zombie/idle_0.png",
+      "res://assets/sprites/0x72/ice_zombie/idle_1.png",
+      "res://assets/sprites/0x72/ice_zombie/idle_2.png",
+      "res://assets/sprites/0x72/ice_zombie/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/ice_zombie/run_0.png",
+      "res://assets/sprites/0x72/ice_zombie/run_1.png",
+      "res://assets/sprites/0x72/ice_zombie/run_2.png",
+      "res://assets/sprites/0x72/ice_zombie/run_3.png"
+     ]
+    },
+    {
+     "id": "dcss__ice_beast",
+     "name": "Icicle Jester",
+     "idle": [
+      "res://assets/sprites/dcss/ice_beast.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/ice_beast.png"
+     ]
+    },
+    {
+     "id": "dcss__demons__blizzard_demon",
+     "name": "Brain Freeze",
+     "idle": [
+      "res://assets/sprites/dcss/demons__blizzard_demon.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/demons__blizzard_demon.png"
+     ]
+    }
+   ],
+   "boss": {
+    "id": "dcss__frost_giant_new",
+    "name": "Frosty Frotto",
+    "idle": [
+     "res://assets/sprites/dcss/frost_giant_new.png"
+    ],
+    "run": [
+     "res://assets/sprites/dcss/frost_giant_new.png"
+    ]
+   }
+  },
+  {
+   "enemies": [
+    {
+     "id": "0x72__skelet",
+     "name": "Skeletal Intern",
+     "idle": [
+      "res://assets/sprites/0x72/skelet/idle_0.png",
+      "res://assets/sprites/0x72/skelet/idle_1.png",
+      "res://assets/sprites/0x72/skelet/idle_2.png",
+      "res://assets/sprites/0x72/skelet/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/skelet/run_0.png",
+      "res://assets/sprites/0x72/skelet/run_1.png",
+      "res://assets/sprites/0x72/skelet/run_2.png",
+      "res://assets/sprites/0x72/skelet/run_3.png"
+     ]
+    },
+    {
+     "id": "dcss__undead__skeletal_warrior_new",
+     "name": "Bone Middle Manager",
+     "idle": [
+      "res://assets/sprites/dcss/undead__skeletal_warrior_new.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/undead__skeletal_warrior_new.png"
+     ]
+    },
+    {
+     "id": "dcss__undead__phantom_new",
+     "name": "Phantom Puff",
+     "idle": [
+      "res://assets/sprites/dcss/undead__phantom_new.png"
+     ],
+     "run": [
+      "res://assets/sprites/dcss/undead__phantom_new.png"
+     ]
+    }
+   ],
+   "boss": {
+    "id": "0x72__big_zombie",
+    "name": "The Orchard Keeper",
+    "idle": [
+     "res://assets/sprites/0x72/big_zombie/idle_0.png",
+     "res://assets/sprites/0x72/big_zombie/idle_1.png",
+     "res://assets/sprites/0x72/big_zombie/idle_2.png",
+     "res://assets/sprites/0x72/big_zombie/idle_3.png"
+    ],
+    "run": [
+     "res://assets/sprites/0x72/big_zombie/run_0.png",
+     "res://assets/sprites/0x72/big_zombie/run_1.png",
+     "res://assets/sprites/0x72/big_zombie/run_2.png",
+     "res://assets/sprites/0x72/big_zombie/run_3.png"
+    ]
+   }
+  },
+  {
+   "enemies": [
+    {
+     "id": "0x72__angel",
+     "name": "Compliance Angel",
+     "idle": [
+      "res://assets/sprites/0x72/angel/idle_0.png",
+      "res://assets/sprites/0x72/angel/idle_1.png",
+      "res://assets/sprites/0x72/angel/idle_2.png",
+      "res://assets/sprites/0x72/angel/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/angel/run_0.png",
+      "res://assets/sprites/0x72/angel/run_1.png",
+      "res://assets/sprites/0x72/angel/run_2.png",
+      "res://assets/sprites/0x72/angel/run_3.png"
+     ]
+    },
+    {
+     "id": "0x72__necromancer",
+     "name": "Chief Necromancy Officer",
+     "idle": [
+      "res://assets/sprites/0x72/necromancer/idle_0.png",
+      "res://assets/sprites/0x72/necromancer/idle_1.png",
+      "res://assets/sprites/0x72/necromancer/idle_2.png",
+      "res://assets/sprites/0x72/necromancer/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/necromancer/run_0.png",
+      "res://assets/sprites/0x72/necromancer/run_1.png",
+      "res://assets/sprites/0x72/necromancer/run_2.png",
+      "res://assets/sprites/0x72/necromancer/run_3.png"
+     ]
+    },
+    {
+     "id": "0x72__wizzard_f",
+     "name": "Wizzy Whisp",
+     "idle": [
+      "res://assets/sprites/0x72/wizzard_f/idle_0.png",
+      "res://assets/sprites/0x72/wizzard_f/idle_1.png",
+      "res://assets/sprites/0x72/wizzard_f/idle_2.png",
+      "res://assets/sprites/0x72/wizzard_f/idle_3.png"
+     ],
+     "run": [
+      "res://assets/sprites/0x72/wizzard_f/run_0.png",
+      "res://assets/sprites/0x72/wizzard_f/run_1.png",
+      "res://assets/sprites/0x72/wizzard_f/run_2.png",
+      "res://assets/sprites/0x72/wizzard_f/run_3.png"
+     ]
+    }
+   ],
+   "boss": {
+    "id": "dcss__unique__tiamat_green",
+    "name": "Tiamat, VP of Sales",
+    "idle": [
+     "res://assets/sprites/dcss/unique__tiamat_green.png"
+    ],
+    "run": [
+     "res://assets/sprites/dcss/unique__tiamat_green.png"
+    ]
+   }
+  }
+ ]
+}

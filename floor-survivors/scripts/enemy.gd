@@ -46,8 +46,15 @@ var _spin_phase := randf() * TAU
 var _tint_shift := randf_range(-0.04, 0.04)
 var _spikes := PackedVector2Array()  # precomputed spike segments, rotated at draw time
 
+## Pixel-art look (SpriteBank): set by EnemySpawner from the floor's roster
+## before the enemy enters the tree. Empty = the code-drawn blob.
+const SPRITE_HEIGHT_RADII := 2.7  # sprite height as a multiple of the collision radius
+var sprite_entry: Dictionary = {}
+var _anim_phase := randf() * 10.0
+
 func _ready() -> void:
 	add_to_group("enemies")
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	var shape := CollisionShape2D.new()
 	var circle := CircleShape2D.new()
 	circle.radius = radius
@@ -114,6 +121,36 @@ func _draw() -> void:
 	# Ground shadow.
 	draw_set_transform(Vector2(0, radius * 0.55), 0.0, Vector2(1.0, 0.4))
 	draw_circle(Vector2.ZERO, radius * 1.1, Color(0, 0, 0, 0.35))
+	var heat := clampf((_aggression_visual - 1.0) / 0.6, 0.0, 1.0)
+	var pip_y := -radius - 9.0
+	if _uses_sprite():
+		_draw_sprite(flashing, heat, radius * SPRITE_HEIGHT_RADII)
+		pip_y = radius * 0.55 - radius * SPRITE_HEIGHT_RADII - 6.0
+	else:
+		_draw_blob(body, heat, time)
+	# Mid-dodge telegraph: cool ring so the player can see "that one saw it coming".
+	if _dodge_timer > 0.0:
+		draw_arc(Vector2.ZERO, radius + 5.0, time * 8.0, time * 8.0 + TAU * 0.75, 20, Color(UIStyle.CYAN, 0.85), 2.0)
+
+	# Thin health pip once damaged.
+	if hp < max_hp:
+		var w := radius * 1.9
+		var y := pip_y
+		draw_rect(Rect2(-w * 0.5, y, w, 3.0), Color(0, 0, 0, 0.6))
+		draw_rect(Rect2(-w * 0.5, y, w * clampf(hp / max_hp, 0.0, 1.0), 3.0), UIStyle.HP_RED.lightened(0.15))
+
+func _uses_sprite() -> bool:
+	return not sprite_entry.is_empty() and SpriteBank.enabled()
+
+## Sprite standing on the shadow. Hit flash washes it white; the System AI's
+## aggression tints it red (the sprite stand-in for the blob's hot eyes).
+func _draw_sprite(flashing: bool, heat: float, height: float) -> void:
+	var tint := Color(3.0, 3.0, 3.0) if flashing else Color.WHITE.lerp(Color(1.0, 0.5, 0.45), heat * 0.7)
+	SpriteBank.draw_actor(self, sprite_entry, Vector2(0, radius * 0.55), height,
+		velocity.length() > 5.0, _facing.x < 0.0, tint, _anim_phase)
+
+## The original code-drawn look: spiky googly-eyed blob.
+func _draw_blob(body: Color, heat: float, time: float) -> void:
 	# Slowly spinning spikes (behind the body).
 	draw_set_transform(Vector2.ZERO, _spin_phase + time * 0.9, Vector2.ONE)
 	draw_multiline(_spikes, body.darkened(0.35), 3.0)
@@ -126,7 +163,6 @@ func _draw() -> void:
 
 	# Eyes track the direction of travel and glow hotter the more aggressive
 	# the System AI currently has enemies.
-	var heat := clampf((_aggression_visual - 1.0) / 0.6, 0.0, 1.0)
 	var eye_color := Color(1.0, 0.95, 0.75).lerp(Color(1.0, 0.25, 0.2), heat)
 	var perp := Vector2(-_facing.y, _facing.x)
 	var eye_center := _facing * radius * 0.35
@@ -135,16 +171,6 @@ func _draw() -> void:
 		draw_circle(eye, radius * 0.29, Color(0.1, 0.02, 0.04))
 		draw_circle(eye, radius * 0.23, Color(0.98, 0.95, 0.9))
 		draw_circle(eye + _facing * radius * 0.08, radius * 0.13, eye_color.darkened(0.3) if heat < 0.5 else eye_color)
-	# Mid-dodge telegraph: cool ring so the player can see "that one saw it coming".
-	if _dodge_timer > 0.0:
-		draw_arc(Vector2.ZERO, radius + 5.0, time * 8.0, time * 8.0 + TAU * 0.75, 20, Color(UIStyle.CYAN, 0.85), 2.0)
-
-	# Thin health pip once damaged.
-	if hp < max_hp:
-		var w := radius * 1.9
-		var y := -radius - 9.0
-		draw_rect(Rect2(-w * 0.5, y, w, 3.0), Color(0, 0, 0, 0.6))
-		draw_rect(Rect2(-w * 0.5, y, w * clampf(hp / max_hp, 0.0, 1.0), 3.0), UIStyle.HP_RED.lightened(0.15))
 
 func take_damage(amount: float, crit: bool = false) -> void:
 	hp -= amount

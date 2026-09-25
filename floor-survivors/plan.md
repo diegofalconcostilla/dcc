@@ -354,3 +354,9 @@ All fields need the same client-side validation discipline as loot/achievements 
 ## Reference
 
 - Plot research notes (Book 1): World Dungeon is an 18-level structure; protagonist Carl (Coast Guard vet) and Princess Donut (his ex's cat, becomes sapient via an enchanted biscuit); tutorial guide Mordecai; floors 1–2 covered in book 1 along with early audience/interview beats (host Odette) and a set-up quest for Donut (hunting Blood Sultanate royalty by floor nine).
+
+## Sprite art pass (2026-09-25)
+
+Actors are CC0 pixel-art sprites (0x72 DungeonTileset II + Dungeon Crawl Stone Soup) instead of circles: a per-floor roster of 3 enemies + a boss, Carl in boxers and leather jacket, Donut as a white Persian. `SpriteBank` (static) draws them; the code-drawn look is kept behind `GameSettings.sprite_art = false`. Gameplay unchanged. Roster drafted by the local model via `../tools/local_llm.py`, reviewed by hand. Details, roster table and next-step proposals: `docs/art.md`.
+
+**Verified:** headless import and parse clean; screenshots of floors 1/4/5/7/10 with crowds and bosses. **Not verified:** feel in real play (crowd readability, flash/tint strength), other resolutions, export (`roster.json` needs `*.json` in the export include filter).

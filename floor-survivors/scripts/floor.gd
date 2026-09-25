@@ -186,6 +186,7 @@ func _spawn_hud() -> void:
 func _spawn_enemy_spawner() -> void:
 	spawner = EnemySpawner.new()
 	spawner.floor_speed_multiplier = 1.0 + float(current_floor - 1) * FLOOR_SPEED_STEP
+	spawner.floor_number = current_floor
 	add_child(spawner)
 	spawner.enemy_died.connect(_on_enemy_died)
 	spawner.boss_spawned.connect(_on_boss_spawned)
@@ -217,7 +218,11 @@ func _on_enemy_died(point_value: int, _death_position: Vector2) -> void:
 	hud.update_points(total_points)
 
 func _on_boss_spawned() -> void:
-	hud.show_banner("BOSS APPROACHING", "Something large has noticed you.", UIStyle.BOSS_PURPLE, 2.4)
+	var subtitle := "Something large has noticed you."
+	var boss := get_tree().get_first_node_in_group("bosses") as Boss
+	if boss and boss.sprite_entry.has("name"):
+		subtitle = "%s has noticed you." % boss.sprite_entry["name"]
+	hud.show_banner("BOSS APPROACHING", subtitle, UIStyle.BOSS_PURPLE, 2.4)
 	var fx := FxLayer.of(self)
 	if fx:
 		fx.shake(5.0)
