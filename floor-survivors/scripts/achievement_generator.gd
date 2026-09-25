@@ -18,8 +18,8 @@ static func generate(run_summary: Dictionary) -> Variant:
 		}
 	if run_summary.get("bombs_thrown", 0) == 0 and run_summary.get("missiles_cast", 0) == 0:
 		return {
-			"title": "Old Reliable",
-			"description": "Cleared the floor on auto-attacks alone — never touched a bomb or missile.",
+			"title": "Conscientious Objector",
+			"description": "Outlasted the whole floor without firing a single bomb or laser.",
 			"tone": "comedic",
 		}
 	if run_summary.get("distance_moved", 999.0) < 200.0:

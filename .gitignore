@@ -10,3 +10,7 @@ Thumbs.db
 
 # Generated LLM content logs (JSONL, one per session/batch run)
 logs/
+
+# Android build output and the generated LAN Ollama host (tools/build_android.py)
+floor-survivors/build/
+floor-survivors/ollama_host.txt

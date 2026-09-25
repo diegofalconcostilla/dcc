@@ -63,6 +63,8 @@ var _tactic_color := UIStyle.TEXT_DIM
 var _glitch_time := 0.0
 var _flash := 0.0
 
+var _run_over_shown_ms := 0
+
 func _ready() -> void:
 	layer = 2  # above ScreenOverlay (1)
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -216,12 +218,12 @@ func _build_bottom(root: Control) -> void:
 	col.add_child(slots)
 	_slot_bomb = AbilitySlot.new()
 	_slot_bomb.kind = "bomb"
-	_slot_bomb.key_text = "LMB"
+	_slot_bomb.key_text = "TAP" if TouchControls.wanted() else "LMB"
 	_slot_bomb.accent = UIStyle.AMBER
 	slots.add_child(_slot_bomb)
 	_slot_laser = AbilitySlot.new()
 	_slot_laser.kind = "laser"
-	_slot_laser.key_text = "RMB"
+	_slot_laser.key_text = "DRAG" if TouchControls.wanted() else "RMB"
 	_slot_laser.accent = UIStyle.CYAN
 	slots.add_child(_slot_laser)
 
@@ -327,7 +329,7 @@ func _build_run_over(root: Control) -> void:
 	_run_over_stats.alignment = BoxContainer.ALIGNMENT_CENTER
 	_run_over_stats.add_theme_constant_override("separation", 40)
 	box.add_child(_run_over_stats)
-	_run_over_prompt = _label("PRESS R TO TRY AGAIN", 14, UIStyle.TEXT, true)
+	_run_over_prompt = _label("TAP TO TRY AGAIN" if TouchControls.wanted() else "PRESS R TO TRY AGAIN", 14, UIStyle.TEXT, true)
 	_run_over_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(_run_over_prompt)
 
@@ -374,7 +376,10 @@ func _scramble(text: String, amount: float) -> String:
 	return out
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _run_over.visible and not PauseMenu.menu_open and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_R:
+	var restart_key: bool = event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_R
+	# On phones a tap restarts, once the card has been up long enough to read.
+	var restart_tap: bool = event is InputEventScreenTouch and event.pressed and Time.get_ticks_msec() - _run_over_shown_ms > 1500
+	if _run_over.visible and not PauseMenu.menu_open and (restart_key or restart_tap):
 		var floor_node := get_tree().get_first_node_in_group("floor_controller")
 		if floor_node:
 			floor_node.restart_run()  # cancels in-flight LLM requests before reloading
@@ -540,6 +545,7 @@ func show_run_over(outcome: String, text: String, stats: Dictionary) -> void:
 	_add_stat("LEVEL", str(stats.get("level", 1)))
 	_run_over.modulate.a = 0.0
 	_run_over.visible = true
+	_run_over_shown_ms = Time.get_ticks_msec()
 	create_tween().tween_property(_run_over, "modulate:a", 1.0, 0.6)
 
 func _add_stat(caption: String, value: String) -> void:

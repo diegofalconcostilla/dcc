@@ -178,6 +178,10 @@ func _spawn_player() -> void:
 	player.add_to_group("player")
 	player.global_position = Vector2.ZERO
 	add_child(player)
+	if TouchControls.wanted():  # phones: joystick + aim stick overlay
+		var touch := TouchControls.new()
+		touch.player = player
+		add_child(touch)
 	player.hp_changed.connect(_on_player_hp_changed)
 	player.xp_changed.connect(_on_player_xp_changed)
 	player.leveled_up.connect(_on_player_leveled_up)

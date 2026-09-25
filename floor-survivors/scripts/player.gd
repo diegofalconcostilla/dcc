@@ -24,7 +24,7 @@ const BOMB_RADIUS := 60.0
 const BOMB_DAMAGE := 20.0
 const BOMB_MAX_RANGE := 220.0
 
-const MISSILE_COOLDOWN := 0.5
+const MISSILE_COOLDOWN := 0.35  # was 0.5; the laser is now the main weapon (no passive attack)
 const MISSILE_DAMAGE := 12.0
 const MISSILE_RANGE := 260.0
 
@@ -56,7 +56,8 @@ var xp_to_next := 10.0
 
 # Live combat stats, recomputed from the base values + accumulated bonuses
 # whenever a bonus is applied (see _recompute_stats).
-var attack_damage := 8.0
+const STARTING_ATTACK_DAMAGE := 8.0
+var attack_damage := STARTING_ATTACK_DAMAGE  # level-up/loot damage bonuses land here and add to the laser
 var attack_range := BASE_ATTACK_RANGE
 var attack_cooldown := BASE_ATTACK_COOLDOWN
 var crit_chance := 0.0
@@ -71,12 +72,10 @@ var floor_distance_moved := 0.0
 var floor_bombs_thrown := 0
 var floor_missiles_cast := 0
 
-var _attack_timer := 0.0
 var _bomb_timer := 0.0
 var _missile_timer := 0.0
 var _damage_flash := 0.0
-var _attack_flash_target := Vector2.ZERO
-var _attack_flash_timer := 0.0
+var _last_move_dir := Vector2.RIGHT  # touch aim fallback
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST  # crisp pixel-art sprite
@@ -89,21 +88,36 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	_handle_movement(delta)
-	_handle_attack(delta)
+	_handle_fire_input()
 	_bomb_timer = max(0.0, _bomb_timer - delta)
 	_missile_timer = max(0.0, _missile_timer - delta)
 	if _damage_flash > 0.0:
 		_damage_flash -= delta
-	if _attack_flash_timer > 0.0:
-		_attack_flash_timer -= delta
 	queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
+	if TouchControls.active:
+		return  # touch drives abilities (TouchControls); ignore the emulated mouse clicks
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			_throw_bomb()
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			_cast_missile()
+
+# --- Touch (TouchControls) ---------------------------------------------------
+
+## Bomb at a tapped world point.
+func touch_bomb(world_point: Vector2) -> void:
+	_throw_bomb(world_point)
+
+## Where Carl "looks" (sprite facing, aim tick, bomb reticle), in local
+## coords: the cursor with a mouse; on touch, the aim stick, else the way he's moving.
+func _aim_local() -> Vector2:
+	if not TouchControls.active:
+		return get_local_mouse_position()
+	if TouchControls.aim_vector != Vector2.ZERO:
+		return TouchControls.aim_vector * 100.0
+	return _last_move_dir * 100.0
 
 func _handle_movement(delta: float) -> void:
 	var dir := Vector2.ZERO
@@ -115,48 +129,43 @@ func _handle_movement(delta: float) -> void:
 		dir.y -= 1
 	if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN):
 		dir.y += 1
-	velocity = dir.normalized() * SPEED if dir != Vector2.ZERO else Vector2.ZERO
+	if TouchControls.active and TouchControls.move_vector != Vector2.ZERO:
+		dir = TouchControls.move_vector  # analog, length <= 1
+	velocity = (dir.normalized() if dir.length() > 1.0 else dir) * SPEED
 	move_and_slide()
+	if velocity != Vector2.ZERO:
+		_last_move_dir = velocity.normalized()
 	floor_distance_moved += velocity.length() * delta
 
-func _handle_attack(delta: float) -> void:
-	_attack_timer -= delta
-	if _attack_timer > 0.0:
-		return
-	var target := _find_nearest_enemy()
-	if target == null:
-		return
-	_attack_timer = attack_cooldown
-	var damage := attack_damage
-	var crit := false
-	if randf() < crit_chance:
-		damage *= 2.0
-		crit = true
-	if target.has_method("take_damage"):
-		target.take_damage(damage, crit)
-	_attack_flash_target = to_local(target.global_position)
-	_attack_flash_timer = 0.1
+## Held fire: right mouse button on PC, the right-thumb aim stick on touch.
+## There is no passive attack (removed 2026-09-25 at Diego's request): every
+## hit is one the player fires. Level-up and loot bonuses that used to feed the
+## auto-attack (damage, cooldown, range, crit) now feed the laser.
+func _handle_fire_input() -> void:
+	if TouchControls.active:
+		if TouchControls.aim_vector != Vector2.ZERO:
+			_cast_missile(global_position + TouchControls.aim_vector * 100.0)
+	elif Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		_cast_missile()
 
-func _find_nearest_enemy() -> Node2D:
-	var nearest: Node2D = null
-	var nearest_dist := attack_range
-	for enemy in get_tree().get_nodes_in_group("enemies"):
-		var dist: float = global_position.distance_to(enemy.global_position)
-		if dist <= nearest_dist:
-			nearest = enemy
-			nearest_dist = dist
-	return nearest
+func laser_cooldown() -> float:
+	return maxf(MIN_COOLDOWN, MISSILE_COOLDOWN * _cooldown_multiplier)
+
+func laser_damage() -> float:
+	return MISSILE_DAMAGE + attack_damage - STARTING_ATTACK_DAMAGE
 
 ## Left-click ability: throws a bomb at the cursor (clamped to BOMB_MAX_RANGE)
 ## that lands instantly but doesn't explode until its fuse runs out (see
 ## Bomb) — the delay is what gives enemies a window to dodge.
-func _throw_bomb() -> void:
+## `target` = world point to aim at; null = the mouse cursor.
+func _throw_bomb(target: Variant = null) -> void:
 	if _bomb_timer > 0.0:
 		return
 	_bomb_timer = BOMB_COOLDOWN
 	floor_bombs_thrown += 1
 	AudioManager.play_sfx("bomb_throw")
-	var impact := _clamp_to_range(get_global_mouse_position(), BOMB_MAX_RANGE)
+	var aim_point: Vector2 = target if target != null else get_global_mouse_position()
+	var impact := _clamp_to_range(aim_point, BOMB_MAX_RANGE)
 	var bomb := Bomb.new()
 	bomb.global_position = impact
 	bomb.damage = BOMB_DAMAGE
@@ -167,20 +176,21 @@ func _throw_bomb() -> void:
 ## Right-click ability: fires a laser bolt toward the cursor as an actual
 ## traveling projectile (see Laser), not an instant hit — so enemies in its
 ## path get a chance to dodge before it reaches them.
-func _cast_missile() -> void:
+func _cast_missile(target: Variant = null) -> void:
 	if _missile_timer > 0.0:
 		return
-	var aim_dir := (get_global_mouse_position() - global_position).normalized()
+	var aim_point: Vector2 = target if target != null else get_global_mouse_position()
+	var aim_dir := (aim_point - global_position).normalized()
 	if aim_dir == Vector2.ZERO:
 		return
-	_missile_timer = MISSILE_COOLDOWN
+	_missile_timer = laser_cooldown()
 	floor_missiles_cast += 1
 	AudioManager.play_sfx("laser")
 	var laser := Laser.new()
 	laser.global_position = global_position
 	laser.direction = aim_dir
-	laser.damage = MISSILE_DAMAGE
-	laser.max_range = MISSILE_RANGE
+	laser.damage = laser_damage() * (2.0 if randf() < crit_chance else 1.0)
+	laser.max_range = MISSILE_RANGE + _range_bonus
 	laser.dodge_chance = _get_character_profile().get("missile_dodge_chance", 0.0)
 	get_parent().add_child(laser)
 
@@ -207,22 +217,21 @@ func get_bomb_cooldown_fraction() -> float:
 	return clampf(_bomb_timer / BOMB_COOLDOWN, 0.0, 1.0)
 
 func get_laser_cooldown_fraction() -> float:
-	return clampf(_missile_timer / MISSILE_COOLDOWN, 0.0, 1.0)
+	return clampf(_missile_timer / laser_cooldown(), 0.0, 1.0)
 
 func _draw() -> void:
 	var time := Time.get_ticks_msec() / 1000.0
-	var aim := get_local_mouse_position()
+	var aim := _aim_local()
 	var aim_dir := aim.normalized() if aim.length() > 1.0 else Vector2.RIGHT
-
-	# Faint auto-attack range ring: shows where the passive attack reaches.
-	draw_arc(Vector2.ZERO, attack_range, 0.0, TAU, 72, Color(UIStyle.GOLD, 0.09), 1.5)
 
 	# Bomb landing reticle: where the next left-click would land (same
 	# clamp as _throw_bomb) and how big the blast will be. Dim while on cooldown.
-	var impact := aim if aim.length() <= BOMB_MAX_RANGE else aim.normalized() * BOMB_MAX_RANGE
-	var ready_alpha := 0.34 if _bomb_timer <= 0.0 else 0.12
-	draw_arc(impact, BOMB_RADIUS, 0.0, TAU, 40, Color(UIStyle.AMBER, ready_alpha), 1.5)
-	draw_circle(impact, 2.5, Color(UIStyle.AMBER, ready_alpha + 0.15))
+	# (Not on touch: there the bomb lands wherever the player taps.)
+	if not TouchControls.active:
+		var impact := aim if aim.length() <= BOMB_MAX_RANGE else aim.normalized() * BOMB_MAX_RANGE
+		var ready_alpha := 0.34 if _bomb_timer <= 0.0 else 0.12
+		draw_arc(impact, BOMB_RADIUS, 0.0, TAU, 40, Color(UIStyle.AMBER, ready_alpha), 1.5)
+		draw_circle(impact, 2.5, Color(UIStyle.AMBER, ready_alpha + 0.15))
 
 	# Ground shadow.
 	draw_set_transform(Vector2(0, 7), 0.0, Vector2(1.0, 0.45))
@@ -277,13 +286,6 @@ func _draw() -> void:
 		draw_circle(donut + Vector2(-2.3, -0.5), 1.2, Color(0.15, 0.05, 0.1))
 		draw_circle(donut + Vector2(2.3, -0.5), 1.2, Color(0.15, 0.05, 0.1))
 		draw_circle(donut + Vector2(0, -6.6), 1.5, UIStyle.GOLD)  # tiara jewel
-
-	# Auto-attack beam with a glow and an impact flash.
-	if _attack_flash_timer > 0.0:
-		var k := _attack_flash_timer / 0.1
-		draw_line(Vector2.ZERO, _attack_flash_target, Color(UIStyle.GOLD, 0.22 * k), 7.0)
-		draw_line(Vector2.ZERO, _attack_flash_target, Color(1, 0.95, 0.6, 0.85 * k), 2.0)
-		draw_circle(_attack_flash_target, 4.0 + 6.0 * (1.0 - k), Color(1, 0.9, 0.5, 0.5 * k))
 
 func take_damage(amount: float) -> void:
 	hp -= amount

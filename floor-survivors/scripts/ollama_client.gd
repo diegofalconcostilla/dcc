@@ -8,6 +8,21 @@ class_name OllamaClient
 ## design" for the request/response shapes this implements.
 
 const OLLAMA_URL := "http://127.0.0.1:11434/api/generate"
+## Phone builds can't reach 127.0.0.1 (no Ollama on the phone): the Android
+## export writes res://ollama_host.txt with the PC's LAN address, so at home the
+## phone uses the PC's Ollama over Wi-Fi. Unreachable = the usual timeouts and
+## local fallbacks, same as Ollama being off.
+const HOST_FILE := "res://ollama_host.txt"
+static var _url := ""
+
+static func url() -> String:
+	if _url == "":
+		_url = OLLAMA_URL
+		if FileAccess.file_exists(HOST_FILE):
+			var host := FileAccess.get_file_as_string(HOST_FILE).strip_edges()
+			if host != "":
+				_url = "http://%s:11434/api/generate" % host
+	return _url
 const MODEL := "llama3.2:latest"
 # First call after Ollama (re)loads the model costs ~4-5s just to load it into
 # memory (measured); a warm call is well under 1s. 6s gives the cold case a
@@ -329,7 +344,7 @@ func _achievement_standouts(context: Dictionary) -> PackedStringArray:
 	elif st.damage_pct >= 70:
 		out.append("survived by a thread after losing %d%% of their HP" % st.damage_pct)
 	if context.get("bombs_thrown", 0) == 0 and context.get("missiles_cast", 0) == 0:
-		out.append("never used a bomb or a laser, auto-attacks only")
+		out.append("outlasted the floor without firing a single bomb or laser")
 	elif st.bombs_per_min >= 10.0:
 		out.append("threw bombs nonstop (%.0f a minute)" % st.bombs_per_min)
 	elif st.lasers_per_min >= 20.0:
@@ -500,7 +515,7 @@ func _request_json(prompt: String, timeout_sec: float, options: Dictionary = {})
 		payload["options"] = options  # Ollama model options, e.g. {"num_predict": N}
 	var body := JSON.stringify(payload)
 	var headers := PackedStringArray(["Content-Type: application/json"])
-	var err := http.request(OLLAMA_URL, headers, HTTPClient.METHOD_POST, body)
+	var err := http.request(url(), headers, HTTPClient.METHOD_POST, body)
 	if err != OK:
 		http.queue_free()
 		return null
