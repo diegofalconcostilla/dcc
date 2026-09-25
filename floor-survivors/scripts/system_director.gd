@@ -72,7 +72,8 @@ func _process(delta: float) -> void:
 
 	# Stay out of the way of the curator's own (larger, once-per-half-floor)
 	# call so the two don't queue behind each other on the local Ollama.
-	if _request_in_flight or _retry_cooldown > 0.0 or floor_node._curator_busy:
+	# (Also idle when the Esc menu's language-model switch is off, or the run is restarting.)
+	if _request_in_flight or _retry_cooldown > 0.0 or floor_node._curator_busy or floor_node._quitting or not GameSettings.llm_enabled:
 		return
 	var beats_remaining := float(_plan.size()) - _plan_age / BEAT_SEC
 	if _plan.is_empty() or beats_remaining <= PREFETCH_BEATS_REMAINING:
@@ -98,6 +99,11 @@ func _baseline_targets() -> Dictionary:
 		baseline[field] = profile.get(field, CuratorGenerator.DEFAULT_PROFILE[field])
 	baseline["tactic"] = profile.get("tactic", "none")
 	return baseline
+
+## True while a plan request is awaiting the model (floor.gd's restart_run waits
+## for this to clear before it frees the scene).
+func is_request_in_flight() -> bool:
+	return _request_in_flight
 
 ## Fire-and-forget (same pattern as floor.gd's curator call): awaits the model
 ## without blocking _process.

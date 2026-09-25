@@ -5,6 +5,8 @@ const MAX_FLOOR := 10
 # Per-floor cumulative speed bump for monsters (floor 1 = 1.0x, floor 10 = ~2.35x).
 # Placeholder value pending playtesting, same as the tier thresholds in LootGenerator.
 const FLOOR_SPEED_STEP := 0.15
+# The loot-box chime is one sample; higher tiers just ring higher.
+const LOOT_STING_PITCH := {"common": 0.85, "uncommon": 0.93, "rare": 1.0, "epic": 1.12, "legendary": 1.25}
 
 var player: Player
 var hud: GameHud
@@ -29,6 +31,14 @@ var _last_hp := 100.0  # presentation only: lets the hit flash tell damage from 
 var _mid_floor_curator_done := false
 var _curator_busy := false
 
+# Restart bookkeeping (see restart_run): _flows counts the coroutines that are
+# awaiting the LLM / a delay (the mid-floor curator call and the floor-end
+# sequence), and _quitting tells them to bail out. Reloading the scene only
+# after _flows hits 0 is what keeps a mid-request restart from leaving orphaned
+# awaits behind.
+var _quitting := false
+var _flows := 0
+
 # The System AI's live per-second hand on the fight, layered over the curator's
 # standing numbers (see get_effective_profile).
 var director: SystemDirector
@@ -50,6 +60,7 @@ func _ready() -> void:
 	director = SystemDirector.new()
 	director.floor_node = self  # set before add_child so its _ready can read the profile
 	add_child(director)
+	add_child(PauseMenu.new())
 	hud.show_floor_banner(current_floor, MAX_FLOOR)
 	# Testing hook (see DebugCapture): only active when DCC_CAPTURE_DIR is set.
 	if OS.get_environment("DCC_CAPTURE_DIR") != "":
@@ -75,7 +86,7 @@ func _resolve_floor_duration() -> float:
 	return DEFAULT_FLOOR_DURATION
 
 func _process(delta: float) -> void:
-	if not floor_active:
+	if not floor_active or _quitting:
 		return
 	time_remaining = max(0.0, time_remaining - delta)
 	hud.update_timer(time_remaining)
@@ -96,6 +107,7 @@ func _process(delta: float) -> void:
 ## later on their own). Guarded by _mid_floor_curator_done so it only fires
 ## once per floor.
 func _run_mid_floor_curator() -> void:
+	_flows += 1
 	_curator_busy = true
 	character_profile = await ollama.get_curator_update({
 		"floor": current_floor,
@@ -107,7 +119,9 @@ func _run_mid_floor_curator() -> void:
 		"missiles_cast": player.floor_missiles_cast,
 	}, character_profile)
 	_curator_busy = false
-	await _apply_curator_profile()
+	if not _quitting:
+		await _apply_curator_profile()
+	_flows -= 1
 
 ## Hands the System AI's latest tactical numbers to the live spawner and, if
 ## it left a taunt, shows it to the player. Called after every curator_update
@@ -121,7 +135,29 @@ func _apply_curator_profile() -> void:
 		hud.show_toast(commentary, "system", 4.5)
 		# Give the taunt a moment on screen before anything else can overwrite
 		# it (floor-end otherwise moves straight into the next floor's toast).
-		await get_tree().create_timer(2.5).timeout
+		await _wait(2.5)
+
+## Sleeps `seconds` of real time (it keeps running through the floor-end pause,
+## like the SceneTreeTimers it replaces) but returns early if a restart begins,
+## so nothing is left waiting when the scene is freed.
+func _wait(seconds: float) -> void:
+	var end_msec := Time.get_ticks_msec() + int(seconds * 1000.0)
+	while Time.get_ticks_msec() < end_msec and not _quitting:
+		await get_tree().process_frame
+
+## Restarts the run (HUD's R on the run-over card, the Esc menu). Cancels the
+## in-flight LLM requests, waits for every coroutine that was awaiting them to
+## finish unwinding, then reloads — so nothing resumes after the scene is gone
+## (the old "R during an Ollama request logs script errors" bug).
+func restart_run() -> void:
+	if _quitting:
+		return
+	_quitting = true
+	ollama.cancel()
+	while _flows > 0 or director.is_request_in_flight():
+		await get_tree().process_frame
+	get_tree().paused = false
+	get_tree().reload_current_scene()
 
 func _spawn_player() -> void:
 	player = Player.new()
@@ -202,7 +238,13 @@ func _end_floor(outcome: String) -> void:
 	floor_active = false
 	get_tree().paused = true
 	hud.show_floor_end(outcome)
+	_flows += 1
+	await _run_floor_end(outcome)
+	_flows -= 1
 
+## The floor-end sequence. Every await is followed by a _quitting check so a
+## restart (restart_run) can cut it short.
+func _run_floor_end(outcome: String) -> void:
 	var floor_end_context := {
 		"floor": current_floor,
 		"outcome": outcome,
@@ -218,10 +260,12 @@ func _end_floor(outcome: String) -> void:
 		# Character died: no achievements, no loot — just a narrated end to
 		# the run (see OllamaClient.get_game_over_message).
 		var death_message: String = await ollama.get_game_over_message(floor_end_context, character_profile)
+		if _quitting:
+			return
 		hud.show_toast(death_message, "death", 6.0)
 		run_over_note = death_message
 		print("Floor %d ended: outcome=collapsed. %s" % [current_floor, death_message])
-		await get_tree().create_timer(3.5).timeout
+		await _wait(3.5)
 	else:
 		# Loot is achievement-gated: no achievement, no loot box. This is
 		# decided before loot generation, on purpose, so the loot call (when it
@@ -229,12 +273,19 @@ func _end_floor(outcome: String) -> void:
 		# thematically tied to it, rather than the two being generated
 		# independently.
 		var result: Dictionary = await ollama.get_achievement(floor_end_context, character_profile)
+		if _quitting:
+			return
 		if result.get("earned", false):
 			var achievement: Dictionary = result["achievement"]
-			await get_tree().create_timer(3.5).timeout
+			await _wait(3.5)
+			if _quitting:
+				return
 			hud.show_toast(achievement["description"], "achievement", 6.0, Color.TRANSPARENT, achievement["title"])
+			AudioManager.play_sting("achievement")
 			print("Achievement: %s" % achievement)
-			await get_tree().create_timer(3.5).timeout
+			await _wait(3.5)
+			if _quitting:
+				return
 
 			var tier := LootGenerator.compute_tier(current_floor, floor_points, floor_damage_taken, character_profile.get("loot_generosity_multiplier", 1.0))
 			hud.show_toast("", "loot", 4.0, UIStyle.tier_color(tier), "Opening %s loot box..." % tier.to_upper())
@@ -243,21 +294,28 @@ func _end_floor(outcome: String) -> void:
 				"points_this_floor": floor_points,
 				"damage_taken_this_floor": floor_damage_taken,
 			}, character_profile, achievement)
+			if _quitting:
+				return
 			player.apply_loot(loot)
 			hud.show_toast(loot["flavor_text"], "loot", 7.0, UIStyle.tier_color(tier), "%s  [%s]" % [loot["name"], tier.to_upper()])
+			AudioManager.play_sting("loot", LOOT_STING_PITCH.get(tier, 1.0))
 			print("Floor %d ended: outcome=%s tier=%s loot=%s achievement=%s" % [current_floor, outcome, tier, loot, achievement["title"]])
-			await get_tree().create_timer(3.0).timeout
+			await _wait(3.0)
 		else:
 			var message: String = result.get("message", "")
 			hud.show_toast(message)
 			print("Floor %d ended: outcome=%s, no achievement, no loot. %s" % [current_floor, outcome, message])
-			await get_tree().create_timer(2.0).timeout
+			await _wait(2.0)
+	if _quitting:
+		return
 
 	# If the mid-floor call is still in flight (e.g. a cold Ollama load outlasting
 	# a short DCC_FLOOR_DURATION test floor), wait for it so its result can't
 	# land after — and clobber — this floor-end update.
 	while _curator_busy:
 		await get_tree().process_frame
+	if _quitting:
+		return
 	_curator_busy = true
 	character_profile = await ollama.get_curator_update({
 		"floor": current_floor,
@@ -270,7 +328,11 @@ func _end_floor(outcome: String) -> void:
 		"missiles_cast": player.floor_missiles_cast,
 	}, character_profile)
 	_curator_busy = false
+	if _quitting:
+		return
 	await _apply_curator_profile()
+	if _quitting:
+		return
 
 	if outcome == "cleared" and current_floor < MAX_FLOOR:
 		_start_next_floor()

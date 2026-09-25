@@ -11,7 +11,7 @@ class_name DebugCapture
 ##
 ## Actions: shot:name | close:N (spawn N enemies near the player) | boss |
 ## bomb:dx,dy | laser:dx,dy | hp:N | xp:N | end (expire the floor) | die | quit
-## | floor:N (jump to floor N) | god:N (keep HP >= N) | tactic:name | toast:kind | runover | pressr (simulate the restart key) | fx (dump a sample of every effect type). Timings are wall-clock seconds
+## | floor:N (jump to floor N) | god:N (keep HP >= N) | tactic:name | toast:kind | runover | pressr (simulate the restart key) | fx (dump a sample of every effect type) | esc (simulate the Esc key) | settings (open the menu's settings page) | restart (floor.restart_run(), e.g. mid-request) | menurestart (the menu's Restart button) | state (print paused/floor_active/menu) | llm:on/off. Timings are wall-clock seconds
 ## since the floor started; the node ignores pause so it can shoot the
 ## end-of-floor screens too.
 
@@ -112,6 +112,25 @@ func _run(action: String, arg: String) -> void:
 			Input.parse_input_event(key)
 		"runover":
 			floor_node.hud.show_run_over("collapsed", "The System regrets nothing. Carl regrets everything.", {"floor": 4, "points": 1820, "level": 9})
+		"esc":
+			var esc := InputEventKey.new()
+			esc.keycode = KEY_ESCAPE
+			esc.physical_keycode = KEY_ESCAPE
+			esc.pressed = true
+			Input.parse_input_event(esc)
+		"settings":
+			var menu := get_tree().get_first_node_in_group("pause_menu")
+			if not menu.is_open():
+				menu.open()
+			menu._show_page(true)
+		"restart":
+			floor_node.restart_run()
+		"menurestart":
+			get_tree().get_first_node_in_group("pause_menu")._on_restart()
+		"state":
+			print("[capture] state: paused=%s floor_active=%s menu_open=%s floor=%d" % [get_tree().paused, floor_node.floor_active, PauseMenu.menu_open, floor_node.current_floor])
+		"llm":
+			GameSettings.set_llm_enabled(arg == "on")
 		"quit":
 			get_tree().quit()
 

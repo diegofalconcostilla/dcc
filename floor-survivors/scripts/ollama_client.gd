@@ -19,6 +19,22 @@ const DEFAULT_TIMEOUT_SEC := 6.0
 const DIRECTOR_TIMEOUT_SEC := 5.0
 const DIRECTOR_MAX_TOKENS := 500
 
+## Set by cancel() when the run is being restarted: every in-flight and future
+## request resolves to null within a frame, so the coroutines awaiting them can
+## unwind and finish *before* the scene is freed (otherwise Godot logs "Resumed
+## function after await, but class instance is gone"). See floor.gd's restart_run.
+var cancelled := false
+
+## Abandon all in-flight and future requests (callers get null -> their normal
+## fallback path). Also silences ContentLogger so a restart doesn't log the
+## fallbacks it forced.
+func cancel() -> void:
+	cancelled = true
+
+func _log(event: Dictionary) -> void:
+	if not cancelled:
+		ContentLogger.log_event(event)
+
 ## `achievement` (optional): {"title", "description", "tone"} — when given, the
 ## loot is generated to thematically tie into it (loot is now achievement-
 ## gated; see floor.gd's _end_floor, which only calls this when one was earned).
@@ -42,7 +58,7 @@ func get_loot(tier: String, context: Dictionary, profile: Dictionary = {}, achie
 		result = LootGenerator.generate_loot(tier, context)
 		source = "fallback_no_response"
 
-	ContentLogger.log_event({
+	_log({
 		"kind": "loot",
 		"tier": tier,
 		"context": context,
@@ -90,7 +106,7 @@ func get_achievement(context: Dictionary, profile: Dictionary = {}) -> Dictionar
 			message = AchievementGenerator.generate_no_award_message(context)
 
 	var result := {"earned": achievement != null, "achievement": achievement, "message": message}
-	ContentLogger.log_event({
+	_log({
 		"kind": "achievement",
 		"context": context,
 		"prompt": prompt,
@@ -121,7 +137,7 @@ func get_game_over_message(context: Dictionary, profile: Dictionary = {}) -> Str
 		print("[OllamaClient] game_over: LLM-generated")
 		source = "llm"
 
-	ContentLogger.log_event({
+	_log({
 		"kind": "game_over",
 		"context": context,
 		"prompt": prompt,
@@ -143,7 +159,7 @@ func get_curator_update(context: Dictionary, previous_profile: Dictionary) -> Di
 	var source: String
 
 	if raw != null:
-		var validated := CuratorGenerator.validate_and_clamp(raw)
+		var validated := CuratorGenerator.validate_and_clamp(raw, str(previous_profile.get("ai_approach", "")))
 		if not validated.is_empty():
 			print("[OllamaClient] curator: profile updated (phase=%s)" % context.get("phase", "?"))
 			result = validated
@@ -157,7 +173,7 @@ func get_curator_update(context: Dictionary, previous_profile: Dictionary) -> Di
 		result = previous_profile.duplicate(true)
 		source = "fallback_no_response"
 
-	ContentLogger.log_event({
+	_log({
 		"kind": "curator",
 		"context": context,
 		"previous_profile": previous_profile,
@@ -185,7 +201,7 @@ func get_director_plan(context: Dictionary, profile: Dictionary) -> Array:
 
 	# The prompt is templated from `context` + the profile, so it's left out of
 	# the log (this fires every few seconds) — the context is enough to rebuild it.
-	ContentLogger.log_event({
+	_log({
 		"kind": "director",
 		"context": context,
 		"raw_response": raw,
@@ -321,6 +337,30 @@ func _build_game_over_prompt(context: Dictionary, profile: Dictionary = {}) -> S
 		lines.insert(3, profile_line)
 	return "\n".join(lines)
 
+## The previous profile as shown to the model inside the prompt's JSON blob —
+## minus ai_approach, which gets its own block (see _approach_instructions).
+## Leaving it in the blob meant the model regenerated it along with everything
+## else, and paraphrased it nearly every cycle.
+func _profile_without_approach(profile: Dictionary) -> Dictionary:
+	var shown := profile.duplicate(true)
+	shown.erase("ai_approach")
+	return shown
+
+## The ai_approach block of the curator prompt. Design notes (from the logged
+## playtests, see plan.md): (1) the standing approach is quoted on its own, not
+## buried in the JSON; (2) the model makes an explicit revise_approach decision
+## instead of being told to "keep it stable" while regenerating it; (3) NO
+## example approaches — the 3B model copied the old examples verbatim into a
+## large share of real runs — so the text describes what an approach is instead;
+## (4) it must not name this cycle's tactic/abilities, because those change every
+## cycle and dragged the approach along with them.
+func _approach_instructions(standing: String) -> String:
+	var what := "An approach is your long game for the whole run: how you plan to pace the escalation across floors, when you'll be cruel and when you'll deceive them with kindness, what you're building toward. It is NOT this cycle's tactic — never name a tactic, an ability or a number in it, since those change every cycle. Write one sentence in your own voice (<=160 chars), original wording."
+	if standing == "":
+		return "You have no approach yet. This is your first read on them, so commit to one now: set revise_approach to true and write it in ai_approach. %s" % what
+	return "Your standing approach, chosen earlier and still in force: \"%s\"
+Keep it. Set revise_approach to false and leave ai_approach as that exact same text. Change it ONLY at a genuine turning point — they nearly died, killed a boss, or their whole way of playing shifted — and then set revise_approach to true and write the new approach in ai_approach. Changing it to vary things up, or because the tactic changed, defeats the point of a long game. %s" % [standing, what]
+
 ## Curator prompt: folds this window's aggregates + the previous profile into
 ## a request for a fresh, same-shape profile PLUS a live tactical decision
 ## against the player (see CuratorGenerator) — the System AI is an in-fiction
@@ -351,7 +391,7 @@ func _build_curator_prompt(context: Dictionary, previous_profile: Dictionary) ->
 		situation,
 		"So far this window: %d points, %d damage taken, moved %d px, threw %d bombs, cast %d laser bolts." % [points, int(damage), int(distance), bombs, missiles],
 		"",
-		"Previous profile + tactic: %s" % JSON.stringify(previous_profile),
+		"Previous profile + tactic: %s" % JSON.stringify(_profile_without_approach(previous_profile)),
 		"",
 		"Available tactics (pick the one that best exploits their current habits, or \"none\" if you don't have a read on them yet):",
 		"- none: no exploit yet, everything neutral.",
@@ -365,12 +405,12 @@ func _build_curator_prompt(context: Dictionary, previous_profile: Dictionary) ->
 		"",
 		"Separately, you control loot_generosity_multiplier (0.7-1.4, 1.0 = neutral) — how generous or stingy you feel about their reward if they earn a loot box this cycle. Below 1.0 lowers the bar for a good loot tier (spoil them, maybe to lull them into carelessness); above 1.0 raises it (make them work harder for the same reward). This is independent of your combat tactic — you can be aggressive in the arena and still feel generous about the loot, or vice versa.",
 		"",
-		"You also maintain ai_approach: your OWN chosen long-term strategy for how you intend to play this entire run, in your own words (<=160 chars). This is different from \"tactic\" above — tactic is just the specific tool you're reaching for THIS cycle; ai_approach is the overarching plan those tactics are in service of (e.g. \"Grind them down slowly through attrition and stinginess rather than flashy kills\", \"Spoil them with easy wins early to make the eventual gut-punch land harder\", \"Focus everything on whichever ability they lean on — deny them their crutch\"). If the previous profile's ai_approach is empty, this is your first read on them — establish one now. If it's already set, KEEP IT STABLE and reuse it near-verbatim unless something in this window (a near-death, a boss kill, a big shift in their play) genuinely justifies evolving your strategy — don't rewrite it just for variety.",
+		_approach_instructions(str(previous_profile.get("ai_approach", ""))),
 		"",
-		"Produce an UPDATED profile + tactic of the exact same shape — refine it, don't just repeat it verbatim. It must fully replace the previous one (fixed size, not a growing log), so drop stale notable_moments if better ones exist now.",
+		"Produce an UPDATED profile + tactic of the exact same shape. Refine every field except ai_approach (handled above) — don't just repeat them verbatim. It must fully replace the previous one (fixed size, not a growing log), so drop stale notable_moments if better ones exist now.",
 		"",
 		"Respond with ONLY a JSON object, no other text, matching exactly this shape:",
-		"{\"playstyle_tags\": [string, ...] (0-3 short tags), \"risk_profile\": \"reckless\"|\"balanced\"|\"cautious\", \"dominant_ability\": \"bomb\"|\"missile\"|\"auto_attack\"|\"balanced\", \"combat_style_summary\": string (<=140 chars), \"narrative_arc\": string (<=200 chars, the running character legend), \"notable_moments\": [string, ...] (0-3 entries, <=80 chars each), \"tone\": \"heroic\"|\"comedic\"|\"grim\"|\"chaotic\", \"tactic\": \"none\"|\"ambush\"|\"swarm\"|\"counter_bomb\"|\"counter_laser\"|\"aggression\"|\"early_boss\", \"bomb_dodge_chance\": number (0.0-0.6), \"missile_dodge_chance\": number (0.0-0.6), \"spawn_interval_multiplier\": number (0.3-1.0), \"spawn_radius_multiplier\": number (0.3-1.0), \"aggression_multiplier\": number (1.0-1.6), \"boss_threshold_multiplier\": number (0.3-1.0), \"loot_generosity_multiplier\": number (0.7-1.4), \"ai_approach\": string (<=160 chars), \"ai_commentary\": string (<=140 chars, a gloating in-character one-liner about what you're about to do to them)}",
+		"{\"playstyle_tags\": [string, ...] (0-3 short tags), \"risk_profile\": \"reckless\"|\"balanced\"|\"cautious\", \"dominant_ability\": \"bomb\"|\"missile\"|\"auto_attack\"|\"balanced\", \"combat_style_summary\": string (<=140 chars), \"narrative_arc\": string (<=200 chars, the running character legend), \"notable_moments\": [string, ...] (0-3 entries, <=80 chars each), \"tone\": \"heroic\"|\"comedic\"|\"grim\"|\"chaotic\", \"tactic\": \"none\"|\"ambush\"|\"swarm\"|\"counter_bomb\"|\"counter_laser\"|\"aggression\"|\"early_boss\", \"bomb_dodge_chance\": number (0.0-0.6), \"missile_dodge_chance\": number (0.0-0.6), \"spawn_interval_multiplier\": number (0.3-1.0), \"spawn_radius_multiplier\": number (0.3-1.0), \"aggression_multiplier\": number (1.0-1.6), \"boss_threshold_multiplier\": number (0.3-1.0), \"loot_generosity_multiplier\": number (0.7-1.4), \"revise_approach\": boolean, \"ai_approach\": string (<=160 chars), \"ai_commentary\": string (<=140 chars, a gloating in-character one-liner about what you're about to do to them)}",
 	])
 	return "\n".join(lines)
 
@@ -378,6 +418,8 @@ func _build_curator_prompt(context: Dictionary, previous_profile: Dictionary) ->
 ## Returns the parsed inner JSON (the model's actual output) on success, or
 ## null on any failure (HTTP error, timeout, malformed JSON at either layer).
 func _request_json(prompt: String, timeout_sec: float, options: Dictionary = {}) -> Variant:
+	if cancelled or not GameSettings.llm_enabled:
+		return null  # Esc-menu "System AI language model" switch off (or restarting): use the local fallback
 	var http := HTTPRequest.new()
 	http.process_mode = Node.PROCESS_MODE_ALWAYS  # keep polling even if the tree is paused
 	add_child(http)
@@ -407,11 +449,18 @@ func _request_json(prompt: String, timeout_sec: float, options: Dictionary = {})
 	)
 
 	var deadline_msec := Time.get_ticks_msec() + int(timeout_sec * 1000.0)
-	while not state["done"] and Time.get_ticks_msec() < deadline_msec:
+	var last_msec := Time.get_ticks_msec()
+	while not state["done"] and Time.get_ticks_msec() < deadline_msec and not cancelled:
 		await get_tree().process_frame
+		var now_msec := Time.get_ticks_msec()
+		if PauseMenu.menu_open:
+			deadline_msec += now_msec - last_msec  # time spent in the Esc menu doesn't count against the request
+		last_msec = now_msec
 
 	http.queue_free()
 
+	if cancelled:
+		return null
 	if not state["done"]:
 		push_warning("[OllamaClient] request timed out after %.1fs" % timeout_sec)
 		return null

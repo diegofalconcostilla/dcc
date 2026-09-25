@@ -172,7 +172,7 @@ func float_text(pos: Vector2, text: String, color: Color, size: float = 16.0, li
 ## Adds camera shake (pixels of offset, decays quickly). Takes the max of the
 ## current and requested strength so overlapping hits don't stack into chaos.
 func shake(amount: float) -> void:
-	_shake = maxf(_shake, amount * UIStyle.SHAKE_SCALE)
+	_shake = maxf(_shake, amount * GameSettings.shake_scale)
 
 func _update_shake(delta: float) -> void:
 	var camera := get_viewport().get_camera_2d()

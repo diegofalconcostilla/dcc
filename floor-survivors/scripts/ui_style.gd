@@ -52,9 +52,6 @@ const TACTIC_COLORS := {
 	"early_boss": Color8(190, 90, 255),
 }
 
-# Debug/accessibility switch for camera shake (see FxLayer.shake).
-const SHAKE_SCALE := 1.0
-
 # --- Per-floor look --------------------------------------------------------
 # Index = floor number - 1. `base` is the ground color, `accent` tints grid
 # seams/motifs and the HUD floor chip. Kept dark and low-saturation so enemies,
@@ -130,5 +127,60 @@ static func build_theme() -> Theme:
 	theme.set_stylebox("panel", "PanelContainer", panel_style())
 	theme.set_stylebox("background", "ProgressBar", bar_style(Color(0.09, 0.10, 0.15, 0.9), 4))
 	theme.set_stylebox("fill", "ProgressBar", bar_style(CYAN, 4))
+	_add_menu_styles(theme)
 	_theme = theme
 	return theme
+
+## Button (also used as the ON/OFF toggles) and HSlider looks for the Esc menu.
+## The focus box is a bright outline so keyboard navigation is always visible.
+static func _add_menu_styles(theme: Theme) -> void:
+	var normal := _button_box(Color(0.09, 0.10, 0.15, 0.95), PANEL_BORDER)
+	var hover := _button_box(Color(0.13, 0.15, 0.23, 0.98), CYAN.darkened(0.25))
+	var pressed := _button_box(Color(0.30, 0.22, 0.06, 0.98), GOLD)
+	var focus := _button_box(Color(0, 0, 0, 0), GOLD, 2)
+	focus.draw_center = false
+	theme.set_stylebox("normal", "Button", normal)
+	theme.set_stylebox("hover", "Button", hover)
+	theme.set_stylebox("pressed", "Button", pressed)
+	theme.set_stylebox("hover_pressed", "Button", pressed)
+	theme.set_stylebox("focus", "Button", focus)
+	theme.set_color("font_color", "Button", TEXT)
+	theme.set_color("font_hover_color", "Button", Color.WHITE)
+	theme.set_color("font_focus_color", "Button", Color.WHITE)
+	theme.set_color("font_pressed_color", "Button", GOLD.lightened(0.3))
+	theme.set_color("font_hover_pressed_color", "Button", GOLD.lightened(0.5))
+	theme.set_font_size("font_size", "Button", 17)
+
+	var track := bar_style(Color(0.09, 0.10, 0.15, 0.95), 4)
+	track.content_margin_top = 4
+	track.content_margin_bottom = 4
+	var fill := bar_style(GOLD.darkened(0.15), 4)
+	fill.content_margin_top = 4
+	fill.content_margin_bottom = 4
+	theme.set_stylebox("slider", "HSlider", track)
+	theme.set_stylebox("grabber_area", "HSlider", fill)
+	theme.set_stylebox("grabber_area_highlight", "HSlider", fill)
+	var grabber := _dot_texture(GOLD.lightened(0.25))
+	theme.set_icon("grabber", "HSlider", grabber)
+	theme.set_icon("grabber_highlight", "HSlider", grabber)
+
+static func _button_box(bg: Color, border: Color, border_width: int = 1) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = border
+	sb.set_border_width_all(border_width)
+	sb.set_corner_radius_all(5)
+	sb.content_margin_left = 16
+	sb.content_margin_right = 16
+	sb.content_margin_top = 8
+	sb.content_margin_bottom = 8
+	return sb
+
+static func _dot_texture(color: Color, size: int = 18) -> ImageTexture:
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var c := (size - 1) * 0.5
+	for y in size:
+		for x in size:
+			var alpha := clampf(c + 0.5 - Vector2(x, y).distance_to(Vector2(c, c)), 0.0, 1.0)
+			img.set_pixel(x, y, Color(color, alpha))
+	return ImageTexture.create_from_image(img)

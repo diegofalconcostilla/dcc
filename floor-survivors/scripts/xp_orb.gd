@@ -22,6 +22,7 @@ func _process(delta: float) -> void:
 	if dist <= PICKUP_RADIUS:
 		if player.has_method("gain_xp"):
 			player.gain_xp(value)
+		AudioManager.play_sfx("pickup", 1.0, 0.12)
 		var fx := FxLayer.of(self)
 		if fx:
 			fx.burst(global_position, UIStyle.MINT, 4, 90.0, 2.2, 0.3)

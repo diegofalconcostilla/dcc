@@ -76,9 +76,26 @@ const DEFAULT_PROFILE := {
 	"ai_approach": "",
 }
 
+## Decides which `ai_approach` text survives this cycle. The model is asked to
+## *decide* whether it is revising its strategy (`revise_approach`), and this
+## only honors that decision: with an approach already set, the old text stays
+## unless the model said true AND wrote a replacement. Without this the model
+## rewrote the approach nearly every cycle (see plan.md's ai_approach
+## investigation) because regenerating the whole profile JSON invites a fresh
+## paraphrase of every field. No formula involved — the LLM still chooses
+## whether and what.
+static func resolve_approach(raw: Dictionary, previous_approach: String) -> String:
+	var proposed: String = str(raw.get("ai_approach", "")).left(APPROACH_MAX_LEN).strip_edges()
+	if previous_approach == "":
+		return proposed  # first read on the player: take whatever it committed to
+	if raw.get("revise_approach", false) == true and proposed != "":
+		return proposed
+	return previous_approach
+
 ## Validates and clamps a raw (untrusted, possibly LLM-generated) profile.
+## `previous_approach` is the standing ai_approach (see resolve_approach).
 ## Returns {} if it's unusable (caller should keep the previous profile).
-static func validate_and_clamp(raw: Variant) -> Dictionary:
+static func validate_and_clamp(raw: Variant, previous_approach: String = "") -> Dictionary:
 	if typeof(raw) != TYPE_DICTIONARY:
 		return {}
 
@@ -101,7 +118,7 @@ static func validate_and_clamp(raw: Variant) -> Dictionary:
 	var combat_style_summary: String = str(raw.get("combat_style_summary", "")).left(SUMMARY_MAX_LEN).strip_edges()
 	var narrative_arc: String = str(raw.get("narrative_arc", "")).left(NARRATIVE_MAX_LEN).strip_edges()
 	var ai_commentary: String = str(raw.get("ai_commentary", "")).left(COMMENTARY_MAX_LEN).strip_edges()
-	var ai_approach: String = str(raw.get("ai_approach", "")).left(APPROACH_MAX_LEN).strip_edges()
+	var ai_approach := resolve_approach(raw, previous_approach)
 
 	var tags := []
 	var raw_tags = raw.get("playstyle_tags", [])

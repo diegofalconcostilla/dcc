@@ -374,9 +374,10 @@ func _scramble(text: String, amount: float) -> String:
 	return out
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _run_over.visible and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_R:
-		get_tree().paused = false
-		get_tree().reload_current_scene()
+	if _run_over.visible and not PauseMenu.menu_open and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_R:
+		var floor_node := get_tree().get_first_node_in_group("floor_controller")
+		if floor_node:
+			floor_node.restart_run()  # cancels in-flight LLM requests before reloading
 
 # --- Updates pushed by floor.gd / player -----------------------------------
 

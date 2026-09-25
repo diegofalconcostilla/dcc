@@ -149,6 +149,7 @@ func _draw() -> void:
 func take_damage(amount: float, crit: bool = false) -> void:
 	hp -= amount
 	_hit_flash = HIT_FLASH_TIME
+	AudioManager.play_sfx("kill" if hp <= 0.0 else "hit")
 	var fx := FxLayer.of(self)
 	if fx:
 		var label_color := Color(1.0, 0.82, 0.25) if crit else Color(1.0, 0.96, 0.86)
@@ -222,6 +223,7 @@ func is_dodging_laser() -> bool:
 ## "DODGED" callout — makes the System AI's counter-play visible at the moment
 ## it happens, not just when a bomb whiffs.
 func _dodge_fx() -> void:
+	AudioManager.play_sfx("dodge")
 	var fx := FxLayer.of(self)
 	if fx:
 		fx.float_text(global_position + Vector2(0, -radius - 8.0), "DODGED", UIStyle.CYAN, 12.0, 0.6, 30.0)

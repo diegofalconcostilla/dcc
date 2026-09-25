@@ -3,7 +3,9 @@ as 16-bit mono WAVs under assets/audio/. No samples, no external assets — ever
 sound is synthesized here (square/pulse, quantized triangle, LFSR-ish noise), so
 the music is original and license-free.
 
-Run from the repo root:  python tools/make_chiptune.py
+Run from the game folder:  python tools/make_chiptune.py
+(add `sfx` to render only the sound effects + the achievement/loot stingers).
+Sound effects are short one-shots played through AudioManager.play_sfx.
 
 All five stems share one tempo/length and are rendered so each loops seamlessly
 (note tails are folded back onto the start; steady drones use whole numbers of
@@ -272,6 +274,101 @@ def sting_game_over():
     return normalize(buf, 0.8)
 
 
+# -------------------------------------------------------------- sound effects
+def sweep(f0, f1, dur, duty=0.5, decay=6.0, vol=0.6):
+    """Pulse voice gliding exponentially from f0 to f1 Hz."""
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    f = f0 * (f1 / f0) ** (t / dur)
+    ph = np.cumsum(f) / SR
+    return np.where((ph % 1.0) < duty, 1.0, -1.0) * env(n, decay=decay) * vol
+
+
+def noise_burst(dur, decay, vol=0.6, smooth=0):
+    """Decaying noise; `smooth` (moving-average width) darkens it toward a thud."""
+    n = int(dur * SR)
+    x = noise(n)
+    if smooth > 1:
+        x = np.convolve(x, np.ones(smooth) / smooth, mode="same") * np.sqrt(smooth)
+    return x * env(n, decay=decay) * vol
+
+
+def mix(*parts):
+    n = max(len(p) for p in parts)
+    out = np.zeros(n)
+    for p in parts:
+        out[: len(p)] += p
+    return out
+
+
+def sfx_hit():
+    return normalize(mix(sweep(1100, 420, 0.06, 0.25, 30, 0.7), noise_burst(0.04, 60, 0.25)), 0.55)
+
+
+def sfx_kill():
+    return normalize(mix(sweep(520, 110, 0.16, 0.5, 11, 0.6), noise_burst(0.12, 22, 0.45, 3)), 0.7)
+
+
+def sfx_hurt():
+    return normalize(mix(sweep(240, 80, 0.24, 0.5, 7, 0.7), noise_burst(0.18, 14, 0.4, 2)), 0.8)
+
+
+def sfx_pickup():
+    a = sweep(1046, 1046, 0.035, 0.25, 20, 0.6)
+    b = sweep(1568, 1568, 0.07, 0.25, 22, 0.6)
+    out = np.zeros(int(0.12 * SR))
+    place(out, a, 0)
+    place(out, b, int(0.035 * SR))
+    return normalize(out, 0.5)
+
+
+def sfx_bomb_throw():
+    return normalize(sweep(260, 760, 0.14, 0.25, 9, 0.6), 0.6)
+
+
+def sfx_bomb_boom():
+    n = int(0.7 * SR)
+    t = np.arange(n) / SR
+    thump = np.sin(2 * np.pi * np.cumsum(130 * np.exp(-t * 5) + 30) / SR) * np.exp(-t * 5) * 0.9
+    return normalize(mix(thump, noise_burst(0.7, 6, 0.8, 5)), 0.9)
+
+
+def sfx_laser():
+    return normalize(mix(sweep(2000, 260, 0.18, 0.125, 9, 0.6), sweep(1000, 130, 0.18, 0.5, 9, 0.35)), 0.7)
+
+
+def sfx_dodge():
+    n = int(0.16 * SR)
+    hiss = np.concatenate([[0], np.diff(noise(n))]) * np.sin(np.pi * np.arange(n) / n) * 0.7
+    return normalize(hiss, 0.45)
+
+
+def sfx_ui_move():
+    return normalize(sweep(1300, 1300, 0.03, 0.25, 40, 0.5), 0.4)
+
+
+def sfx_ui_click():
+    out = np.zeros(int(0.09 * SR))
+    place(out, sweep(760, 760, 0.04, 0.25, 25, 0.6), 0)
+    place(out, sweep(1140, 1140, 0.05, 0.25, 25, 0.6), int(0.04 * SR))
+    return normalize(out, 0.55)
+
+
+def sting_achievement():
+    """Bright rising game-show 'ding-ding-ding-DING'."""
+    notes = [(0.0, 76), (0.09, 79), (0.18, 83), (0.27, 88)]
+    ev = [(t0, m, 0.14, 0.25, 7) for t0, m in notes] + [(0.4, 95, 0.75, 0.125, 3.5), (0.4, 88, 0.75, 0.5, 3.5), (0.4, 83, 0.75, 0.5, 3.5)]
+    return seq(ev, 1.3)
+
+
+def sting_loot():
+    """Coin-chime plus a falling sparkle — the loot box popping open."""
+    ev = [(0.0, 83, 0.07, 0.5, 8), (0.075, 88, 0.55, 0.5, 4)]
+    ev += [(0.3 + i * 0.06, m, 0.12, 0.125, 9) for i, m in enumerate([100, 96, 93, 91, 88])]
+    return seq(ev, 1.0, 0.45)
+
+
+
 def write_wav(name, x):
     os.makedirs(OUT_DIR, exist_ok=True)
     path = os.path.join(OUT_DIR, name)
@@ -284,10 +381,19 @@ def write_wav(name, x):
 
 
 if __name__ == "__main__":
+    import sys
+
+    sfx_only = "sfx" in sys.argv[1:]
     print("loop = %d bars, %.2fs (%d samples @ %d Hz)" % (BARS, N / SR, N, SR))
-    for name, fn in [("music_pad", render_pad), ("music_bass", render_bass), ("music_drums", render_drums),
-                     ("music_lead", render_lead), ("music_menace", render_menace)]:
-        write_wav(name + ".wav", fn())
-    for name, fn in [("sting_level_up", sting_level_up), ("sting_floor_clear", sting_floor_clear),
-                     ("sting_boss", sting_boss), ("sting_game_over", sting_game_over)]:
+    if not sfx_only:
+        for name, fn in [("music_pad", render_pad), ("music_bass", render_bass), ("music_drums", render_drums),
+                         ("music_lead", render_lead), ("music_menace", render_menace)]:
+            write_wav(name + ".wav", fn())
+        for name, fn in [("sting_level_up", sting_level_up), ("sting_floor_clear", sting_floor_clear),
+                         ("sting_boss", sting_boss), ("sting_game_over", sting_game_over)]:
+            write_wav(name + ".wav", fn())
+    for name, fn in [("sting_achievement", sting_achievement), ("sting_loot", sting_loot),
+                     ("sfx_hit", sfx_hit), ("sfx_kill", sfx_kill), ("sfx_hurt", sfx_hurt), ("sfx_pickup", sfx_pickup),
+                     ("sfx_bomb_throw", sfx_bomb_throw), ("sfx_bomb_boom", sfx_bomb_boom), ("sfx_laser", sfx_laser),
+                     ("sfx_dodge", sfx_dodge), ("sfx_ui_move", sfx_ui_move), ("sfx_ui_click", sfx_ui_click)]:
         write_wav(name + ".wav", fn())

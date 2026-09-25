@@ -35,6 +35,7 @@ func _process(delta: float) -> void:
 		_explode()
 
 func _explode() -> void:
+	AudioManager.play_sfx("bomb_boom")
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		if global_position.distance_to(enemy.global_position) <= radius and enemy.has_method("take_damage"):
 			enemy.take_damage(damage)

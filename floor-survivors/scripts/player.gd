@@ -154,6 +154,7 @@ func _throw_bomb() -> void:
 		return
 	_bomb_timer = BOMB_COOLDOWN
 	floor_bombs_thrown += 1
+	AudioManager.play_sfx("bomb_throw")
 	var impact := _clamp_to_range(get_global_mouse_position(), BOMB_MAX_RANGE)
 	var bomb := Bomb.new()
 	bomb.global_position = impact
@@ -173,6 +174,7 @@ func _cast_missile() -> void:
 		return
 	_missile_timer = MISSILE_COOLDOWN
 	floor_missiles_cast += 1
+	AudioManager.play_sfx("laser")
 	var laser := Laser.new()
 	laser.global_position = global_position
 	laser.direction = aim_dir
@@ -271,6 +273,7 @@ func take_damage(amount: float) -> void:
 	hp -= amount
 	_damage_flash = 0.15
 	hp_changed.emit(hp, max_hp)
+	AudioManager.play_sfx("hurt", 1.0, 0.04)
 	var fx := FxLayer.of(self)
 	if fx:
 		fx.sparks(global_position, UIStyle.HP_RED, 5, 150.0, 10.0)
