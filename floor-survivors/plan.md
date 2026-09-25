@@ -360,3 +360,15 @@ All fields need the same client-side validation discipline as loot/achievements 
 Actors are CC0 pixel-art sprites (0x72 DungeonTileset II + Dungeon Crawl Stone Soup) instead of circles: a per-floor roster of 3 enemies + a boss, Carl in boxers and leather jacket, Donut as a white Persian. `SpriteBank` (static) draws them; the code-drawn look is kept behind `GameSettings.sprite_art = false`. Gameplay unchanged. Roster drafted by the local model via `../tools/local_llm.py`, reviewed by hand. Details, roster table and next-step proposals: `docs/art.md`.
 
 **Verified:** headless import and parse clean; screenshots of floors 1/4/5/7/10 with crowds and bosses. **Not verified:** feel in real play (crowd readability, flash/tint strength), other resolutions, export (`roster.json` needs `*.json` in the export include filter).
+
+## Playtest fixes (2026-09-25)
+
+The three open findings from the 2026-09-21 full playtest, fixed ahead of the next one:
+
+1. **Zero achievements -> zero loot.** Two layers. (a) `OllamaClient._achievement_standouts` spots standout stats in code: HP lost <=10% or >=70%, no ability used, bombs >=10/min or lasers >=20/min, moving <15% or >90% of the time. A floor with a standout has earned an achievement, and the model is only asked to *write* it, from those facts. Even when told "that qualifies", llama3.2 declined 8/8 such floors in two verification runs. Floors with no standout stay the model's call. The prompt now shows movement as % of the time, damage as % of max HP and abilities per minute, never raw px. (b) Circuit breaker in `floor.gd`: after `ACHIEVEMENT_DROUGHT_MAX` (2) floors without one, `AchievementGenerator.drought_breaker` guarantees a local achievement.
+2. **Mid-floor curator timeouts.** `_run_mid_floor_curator` now sets `_curator_busy` (the director stops starting requests), then waits up to `CURATOR_WAIT_MAX` (5.5s) for an in-flight director request before calling.
+3. **Repeated `ai_commentary`.** Stripped from the profile echoed back to the model (`_profile_without_approach`); `_commentary_instructions` quotes the previous line as "already aired" and asks for a new one.
+
+Also: Esc menu > Settings gains a "Pixel-art sprites" toggle (`GameSettings.set_sprite_art`).
+
+**Verified** (25s floors, god mode, real `llama3.2`): curator 13/13 calls answered by the LLM, including every mid-floor call; commentary different every cycle; standout floors 2/2 got LLM-written achievements ("Threadbare Survivor", "Thy Unyielding Stasis") and LLM loot; no script errors. **Not verified:** achievement frequency in real play. A player who kites nonstop may hit the >90% moving standout every floor, so loot every floor; if it feels too generous, raise that threshold first. The capture harness's `bomb:`/`laser:` actions don't count toward Carl's ability stats, so ability standouts were only exercised as "none used".

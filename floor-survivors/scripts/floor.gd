@@ -30,6 +30,12 @@ var character_profile := CuratorGenerator.DEFAULT_PROFILE.duplicate(true)
 var _last_hp := 100.0  # presentation only: lets the hit flash tell damage from healing
 var _mid_floor_curator_done := false
 var _curator_busy := false
+# Longest the mid-floor curator waits for an in-flight director request
+# (a director call times out at OllamaClient.DIRECTOR_TIMEOUT_SEC = 5s).
+const CURATOR_WAIT_MAX := 5.5
+# Floors in a row allowed without an achievement before one is guaranteed.
+const ACHIEVEMENT_DROUGHT_MAX := 2
+var _floors_without_achievement := 0
 
 # Restart bookkeeping (see restart_run): _flows counts the coroutines that are
 # awaiting the LLM / a delay (the mid-floor curator call and the floor-end
@@ -108,7 +114,15 @@ func _process(delta: float) -> void:
 ## once per floor.
 func _run_mid_floor_curator() -> void:
 	_flows += 1
-	_curator_busy = true
+	_curator_busy = true  # the director stops starting new requests from here on
+	# ...and the curator waits out one already in flight, so it doesn't spend its
+	# 6s timeout queued behind it on the same Ollama (5/10 mid-floor calls timed
+	# out that way in the 2026-09-21 playtest). Capped so a stuck request can't
+	# hold the curator forever.
+	var waited := 0.0
+	while director and director.is_request_in_flight() and waited < CURATOR_WAIT_MAX and not _quitting:
+		await get_tree().process_frame
+		waited += get_process_delta_time()
 	character_profile = await ollama.get_curator_update({
 		"floor": current_floor,
 		"phase": "mid_floor",
@@ -258,6 +272,8 @@ func _run_floor_end(outcome: String) -> void:
 		"distance_moved": player.floor_distance_moved,
 		"bombs_thrown": player.floor_bombs_thrown,
 		"missiles_cast": player.floor_missiles_cast,
+		"floor_seconds": floor_duration,
+		"max_hp": player.max_hp,
 	}
 
 	var run_over_note := ""  # the LLM's game-over line, shown on the run-over card
@@ -280,6 +296,17 @@ func _run_floor_end(outcome: String) -> void:
 		var result: Dictionary = await ollama.get_achievement(floor_end_context, character_profile)
 		if _quitting:
 			return
+		# Circuit breaker: the 2026-09-21 playtest cleared all 10 floors with zero
+		# achievements (so zero loot). Past a drought, a local achievement is
+		# guaranteed so the loot feature can't go dark for a whole run.
+		if result.get("earned", false):
+			_floors_without_achievement = 0
+		else:
+			_floors_without_achievement += 1
+			if _floors_without_achievement > ACHIEVEMENT_DROUGHT_MAX:
+				print("Achievement drought (%d floors): awarding a local one" % _floors_without_achievement)
+				result = {"earned": true, "achievement": AchievementGenerator.drought_breaker(floor_end_context), "message": ""}
+				_floors_without_achievement = 0
 		if result.get("earned", false):
 			var achievement: Dictionary = result["achievement"]
 			await _wait(3.5)

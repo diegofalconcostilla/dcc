@@ -38,6 +38,7 @@ var _shake_value: Label
 var _mute_toggle: Button
 var _fullscreen_toggle: Button
 var _llm_toggle: Button
+var _art_toggle: Button
 var _in_settings := false
 var _quiet := false  # suppresses the focus tick while we move focus ourselves
 
@@ -115,6 +116,8 @@ func _build() -> void:
 	_shake_slider = _slider(0.0, GameSettings.SHAKE_MAX * 100.0, 10.0)
 	_shake_value = _label("", 15, UIStyle.TEXT_DIM)
 	_settings_page.add_child(_slider_row("Screen shake", _shake_slider, _shake_value))
+	_art_toggle = _toggle()
+	_settings_page.add_child(_row("Pixel-art sprites", _art_toggle))
 	_llm_toggle = _toggle()
 	_settings_page.add_child(_row("System AI language model", _llm_toggle))
 	var llm_note := _label("Off = no Ollama calls; the System AI, achievements and loot use their built-in fallbacks.", 12, UIStyle.TEXT_DIM)
@@ -149,6 +152,9 @@ func _build() -> void:
 	_llm_toggle.toggled.connect(func(on: bool):
 		GameSettings.set_llm_enabled(on)
 		_set_toggle_text(_llm_toggle, on))
+	_art_toggle.toggled.connect(func(on: bool):  # off = the original code-drawn actors
+		GameSettings.set_sprite_art(on)
+		_set_toggle_text(_art_toggle, on))
 	for slider in [_music_slider, _sfx_slider, _shake_slider]:
 		slider.drag_ended.connect(func(_changed: bool): GameSettings.flush())
 
@@ -293,6 +299,7 @@ func _sync_settings(all: bool) -> void:
 	_set_toggle(_mute_toggle, GameSettings.muted)
 	_set_toggle(_fullscreen_toggle, GameSettings.is_fullscreen())
 	_set_toggle(_llm_toggle, GameSettings.llm_enabled)
+	_set_toggle(_art_toggle, GameSettings.sprite_art)
 
 func _set_toggle(button: Button, on: bool) -> void:
 	if button.button_pressed != on:

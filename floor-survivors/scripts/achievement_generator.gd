@@ -30,6 +30,20 @@ static func generate(run_summary: Dictionary) -> Variant:
 		}
 	return null
 
+## Always returns an achievement: the floor's most notable stat if any rule in
+## generate() fires, otherwise a consolation award. Used by the floor's
+## drought circuit breaker (see floor.gd ACHIEVEMENT_DROUGHT_MAX).
+static func drought_breaker(run_summary: Dictionary) -> Dictionary:
+	var notable: Variant = generate(run_summary)
+	if notable != null:
+		return notable
+	var max_hp: float = run_summary.get("max_hp", 100.0)
+	if run_summary.get("damage_taken", 0.0) < max_hp * 0.25:
+		return {"title": "Barely a Scratch", "description": "Took less than a quarter of your health in damage. The audience is mildly disappointed.", "tone": "heroic"}
+	if run_summary.get("bombs_thrown", 0) >= 15:
+		return {"title": "Pyromaniac Tendencies", "description": "Threw enough bombs to void the dungeon's insurance policy.", "tone": "comedic"}
+	return {"title": "Participation Trophy", "description": "The System AI has been legally required to recognize your continued survival.", "tone": "comedic"}
+
 ## Local fallback for the "no achievement earned" toast, used only if the
 ## Ollama call fails/returns invalid — otherwise the LLM's own "message" field
 ## (see OllamaClient._build_achievement_prompt) is shown instead.

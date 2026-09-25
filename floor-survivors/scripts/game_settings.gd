@@ -102,6 +102,10 @@ static func set_shake_scale(v: float) -> void:
 	shake_scale = clampf(v, 0.0, SHAKE_MAX)
 	_dirty = true
 
+static func set_sprite_art(value: bool) -> void:
+	sprite_art = value
+	_dirty = true
+
 static func set_llm_enabled(value: bool) -> void:
 	llm_enabled = value
 	_dirty = true

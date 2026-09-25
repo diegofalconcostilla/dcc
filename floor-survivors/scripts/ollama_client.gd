@@ -76,13 +76,26 @@ func get_loot(tier: String, context: Dictionary, profile: Dictionary = {}, achie
 ## line from the LLM, not a hardcoded string), and is "" when earned is true
 ## (the achievement's own title/description carries the toast instead).
 func get_achievement(context: Dictionary, profile: Dictionary = {}) -> Dictionary:
-	var prompt := _build_achievement_prompt(context, profile)
+	var standouts := _achievement_standouts(context)
+	var prompt := _build_achievement_prompt(context, profile, standouts)
 	var raw: Variant = await _request_json(prompt, DEFAULT_TIMEOUT_SEC)
 	var achievement: Variant = null
 	var message := ""
 	var source: String
 
-	if raw != null and typeof(raw) == TYPE_DICTIONARY:
+	if raw != null and typeof(raw) == TYPE_DICTIONARY and not standouts.is_empty():
+		# A standout floor: earned by definition, the model only writes it.
+		if typeof(raw.get("achievement")) == TYPE_DICTIONARY:
+			var ach: Dictionary = raw["achievement"]
+			var title: String = str(ach.get("title", "")).left(60).strip_edges()
+			var description: String = str(ach.get("description", "")).left(160).strip_edges()
+			if title != "" and description != "":
+				achievement = {"title": title, "description": description, "tone": str(ach.get("tone", "comedic"))}
+		source = "llm_standout"
+		if achievement == null:
+			achievement = AchievementGenerator.drought_breaker(context)
+			source = "fallback_standout_malformed"
+	elif raw != null and typeof(raw) == TYPE_DICTIONARY:
 		if raw.get("earned", false) == true and typeof(raw.get("achievement")) == TYPE_DICTIONARY:
 			var ach: Dictionary = raw["achievement"]
 			var title: String = str(ach.get("title", "")).left(60).strip_edges()
@@ -291,25 +304,66 @@ func _profile_line(profile: Dictionary) -> String:
 		line += " The System AI's chosen approach this run: %s" % approach
 	return line
 
-func _build_achievement_prompt(context: Dictionary, profile: Dictionary = {}) -> String:
-	var floor_num: int = context.get("floor", 1)
-	var points: int = context.get("points", 0)
-	var damage: float = context.get("damage_taken", 0.0)
-	var distance: float = context.get("distance_moved", 0.0)
-	var bombs: int = context.get("bombs_thrown", 0)
-	var missiles: int = context.get("missiles_cast", 0)
+## A floor's stats as shares and rates. Raw pixel counts meant nothing to the
+## model (it called ~13,700 px of movement "barely moving").
+func _achievement_stats(context: Dictionary) -> Dictionary:
+	var seconds: float = maxf(1.0, context.get("floor_seconds", 90.0))
+	var per_min := 60.0 / seconds
+	return {
+		"moving_pct": int(clampf(context.get("distance_moved", 0.0) / (Player.SPEED * seconds), 0.0, 1.0) * 100.0),
+		"damage_pct": mini(int(context.get("damage_taken", 0.0) / maxf(1.0, context.get("max_hp", 100.0)) * 100.0), 100),
+		"bombs_per_min": context.get("bombs_thrown", 0) * per_min,
+		"lasers_per_min": context.get("missiles_cast", 0) * per_min,
+	}
 
+## Standout stats, spotted in code. A floor with any standout earns an
+## achievement: the 3B model declined 8/8 such floors even when told they
+## qualified (playtests 2026-09-21 and 2026-09-25), so for these it is only
+## asked to WRITE the achievement, never whether to award it. Floors with no
+## standout are still the model's call.
+func _achievement_standouts(context: Dictionary) -> PackedStringArray:
+	var st := _achievement_stats(context)
+	var out := PackedStringArray()
+	if st.damage_pct <= 10:
+		out.append("nearly flawless: lost only %d%% of their HP" % st.damage_pct)
+	elif st.damage_pct >= 70:
+		out.append("survived by a thread after losing %d%% of their HP" % st.damage_pct)
+	if context.get("bombs_thrown", 0) == 0 and context.get("missiles_cast", 0) == 0:
+		out.append("never used a bomb or a laser, auto-attacks only")
+	elif st.bombs_per_min >= 10.0:
+		out.append("threw bombs nonstop (%.0f a minute)" % st.bombs_per_min)
+	elif st.lasers_per_min >= 20.0:
+		out.append("fired laser bolts nonstop (%.0f a minute)" % st.lasers_per_min)
+	if st.moving_pct < 15:
+		out.append("barely moved (%d%% of the time)" % st.moving_pct)
+	elif st.moving_pct > 90:
+		out.append("never stopped running (%d%% of the time)" % st.moving_pct)
+	return out
+
+func _build_achievement_prompt(context: Dictionary, profile: Dictionary, standouts: PackedStringArray) -> String:
+	var st := _achievement_stats(context)
 	var lines := PackedStringArray([
 		"You are an achievement generator for a dark-comedy sci-fi dungeon-crawler game (Dungeon Crawler Carl-inspired), styled like a snarky reality-show announcer.",
-		"A player just cleared floor %d with %d points and %d damage taken." % [floor_num, points, int(damage)],
-		"Movement/ability stats for this floor: moved %d px total, threw %d bombs (area damage), cast %d magic missiles (single-target)." % [int(distance), bombs, missiles],
+		"A player just cleared floor %d with %d points, losing %d%% of their max HP to damage (0%% = flawless)." % [context.get("floor", 1), context.get("points", 0), st.damage_pct],
+		"Playstyle this floor: kept moving about %d%% of the time, threw %.1f bombs per minute (area damage), cast %.1f laser bolts per minute (single-target)." % [st.moving_pct, st.bombs_per_min, st.lasers_per_min],
 		"",
-		"Decide if this run deserves a special achievement. Be selective: most runs should NOT get one — only for something notably good, notably bad, or funny. Feel free to call out a distinctive playstyle from the movement/ability stats: barely moving, kiting constantly, spamming one ability, never using an ability, etc.",
-		"",
-		"Respond with ONLY a JSON object, no other text, matching exactly this shape:",
-		"{\"earned\": boolean, \"achievement\": {\"title\": string (<=60 chars), \"description\": string (<=160 chars), \"tone\": \"heroic\"|\"comedic\"|\"grim\"} or null, \"message\": string (<=140 chars)}",
-		"\"message\" is ALWAYS required: if earned is false, it's your own snarky one-liner about why this floor wasn't worth commemorating (shown to the player instead of an achievement) — never leave it blank. If earned is true, just repeat a short hype line or leave it empty; the achievement's own title/description is what gets shown.",
 	])
+	if not standouts.is_empty():
+		lines.append_array([
+			"This floor EARNED an achievement for: %s." % "; ".join(standouts),
+			"Write it: a punchy title and a one-sentence description grounded in those facts, in the announcer's voice.",
+			"",
+			"Respond with ONLY a JSON object, no other text, matching exactly this shape:",
+			"{\"achievement\": {\"title\": string (<=60 chars), \"description\": string (<=160 chars), \"tone\": \"heroic\"|\"comedic\"|\"grim\"}}",
+		])
+	else:
+		lines.append_array([
+			"Nothing stood out statistically. Award an achievement only if something in these numbers is genuinely funny or notable; otherwise don't.",
+			"",
+			"Respond with ONLY a JSON object, no other text, matching exactly this shape:",
+			"{\"earned\": boolean, \"achievement\": {\"title\": string (<=60 chars), \"description\": string (<=160 chars), \"tone\": \"heroic\"|\"comedic\"|\"grim\"} or null, \"message\": string (<=140 chars)}",
+			"\"message\" is ALWAYS required: if earned is false, it's your own snarky one-liner about why this floor wasn't worth commemorating (shown to the player instead of an achievement) — never leave it blank. If earned is true, just repeat a short hype line or leave it empty; the achievement's own title/description is what gets shown.",
+		])
 	var profile_line := _profile_line(profile)
 	if profile_line != "":
 		lines.insert(3, profile_line)
@@ -340,11 +394,21 @@ func _build_game_over_prompt(context: Dictionary, profile: Dictionary = {}) -> S
 ## The previous profile as shown to the model inside the prompt's JSON blob —
 ## minus ai_approach, which gets its own block (see _approach_instructions).
 ## Leaving it in the blob meant the model regenerated it along with everything
-## else, and paraphrased it nearly every cycle.
+## else, and paraphrased it nearly every cycle. ai_commentary is stripped too:
+## echoed back, the model copied it forward verbatim (floors 6-9 of the
+## 2026-09-21 playtest); it gets its own "never repeat" line instead.
 func _profile_without_approach(profile: Dictionary) -> Dictionary:
 	var shown := profile.duplicate(true)
 	shown.erase("ai_approach")
+	shown.erase("ai_commentary")
 	return shown
+
+## ai_commentary is a fresh one-off line every cycle, never a carried-over field.
+func _commentary_instructions(previous_line: String) -> String:
+	var ask := "Write a brand-new ai_commentary this cycle about what you're about to do to them. Never repeat or paraphrase an earlier line."
+	if previous_line == "":
+		return ask
+	return "Your previous one-liner was: \"%s\" — it has aired already. %s" % [previous_line, ask]
 
 ## The ai_approach block of the curator prompt. Design notes (from the logged
 ## playtests, see plan.md): (1) the standing approach is quoted on its own, not
@@ -406,6 +470,8 @@ func _build_curator_prompt(context: Dictionary, previous_profile: Dictionary) ->
 		"Separately, you control loot_generosity_multiplier (0.7-1.4, 1.0 = neutral) — how generous or stingy you feel about their reward if they earn a loot box this cycle. Below 1.0 lowers the bar for a good loot tier (spoil them, maybe to lull them into carelessness); above 1.0 raises it (make them work harder for the same reward). This is independent of your combat tactic — you can be aggressive in the arena and still feel generous about the loot, or vice versa.",
 		"",
 		_approach_instructions(str(previous_profile.get("ai_approach", ""))),
+		"",
+		_commentary_instructions(str(previous_profile.get("ai_commentary", ""))),
 		"",
 		"Produce an UPDATED profile + tactic of the exact same shape. Refine every field except ai_approach (handled above) — don't just repeat them verbatim. It must fully replace the previous one (fixed size, not a growing log), so drop stale notable_moments if better ones exist now.",
 		"",
