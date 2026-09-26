@@ -14,9 +14,11 @@ LAN and the firewall must allow it (one-time, see docs/android.md).
 
 import argparse
 import os
+import re
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 GAME = Path(__file__).resolve().parent.parent
@@ -24,8 +26,9 @@ GODOT = Path(os.environ.get("GODOT", r"C:\Users\diego\AppData\Local\Microsoft\Wi
              r"\GodotEngine.GodotEngine_Microsoft.Winget.Source_8wekyb3d8bbwe\Godot_v4.7.2-stable_win64_console.exe"))
 ANDROID_SDK = r"C:\Android\sdk"
 JAVA_HOME = r"C:\Program Files\Microsoft\jdk-17.0.20.101-hotspot"
-APK = GAME / "build" / "floor-survivors.apk"
 HOST_FILE = GAME / "ollama_host.txt"
+BUILD_FILE = GAME / "build_info.txt"  # stamp shown in-game (TouchControls), to tell builds apart
+PRESET = GAME / "export_presets.cfg"
 
 
 def lan_ip() -> str:
@@ -69,18 +72,31 @@ def main():
         HOST_FILE.write_text(host + "\n", encoding="utf-8")
         print(f"Ollama host baked in: {host}:11434")
 
-    APK.parent.mkdir(exist_ok=True)
-    print("importing...")
-    run(["--import"])
-    print("exporting APK (a minute or two)...")
-    proc = run(["--export-debug", "Android", str(APK)])
-    if proc.returncode != 0 or not APK.exists():
+    # Every build gets a higher versionCode (minutes since 1970, fits Android's int32), a unique file name
+    # and a stamp shown in-game, so the phone always takes it as an update and you can tell builds apart.
+    stamp = time.strftime("%m%d-%H%M")
+    BUILD_FILE.write_text(stamp + "\n", encoding="utf-8")
+    apk = GAME / "build" / f"floor-survivors-{stamp}.apk"
+    preset = PRESET.read_text(encoding="utf-8")
+    versioned = re.sub(r"^version/code=.*$", f"version/code={int(time.time() // 60)}", preset, flags=re.M)
+    versioned = re.sub(r"^version/name=.*$", f'version/name="0.1.{stamp}"', versioned, flags=re.M)
+    PRESET.write_text(versioned, encoding="utf-8")
+    try:
+        apk.parent.mkdir(exist_ok=True)
+        print("importing...")
+        run(["--import"])
+        print(f"exporting APK, build {stamp} (a minute or two)...")
+        proc = run(["--export-debug", "Android", str(apk)])
+    finally:
+        PRESET.write_text(preset, encoding="utf-8")  # keep the committed preset stable
+    if proc.returncode != 0 or not apk.exists():
         print(proc.stdout[-3000:], proc.stderr[-3000:], sep="\n")
         sys.exit("export failed")
-    print(f"built {APK} ({APK.stat().st_size / 1e6:.1f} MB)")
+    print(f"built {apk} ({apk.stat().st_size / 1e6:.1f} MB)")
     if args.send:
-        send_telegram(APK, "Floor Survivors - tap to download, then install. "
-                           "Left thumb: move. Right thumb: drag = laser, tap = bomb.")
+        send_telegram(apk, f"Floor Survivors build {stamp} (the same stamp shows at the bottom-left of the game). "
+                           "Tap to download, then install over the old one. "
+                           "Left thumb: move. Right side: hold a spot = laser, double-tap = bomb.")
 
 
 if __name__ == "__main__":

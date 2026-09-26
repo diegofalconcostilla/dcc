@@ -14,3 +14,4 @@ logs/
 # Android build output and the generated LAN Ollama host (tools/build_android.py)
 floor-survivors/build/
 floor-survivors/ollama_host.txt
+floor-survivors/build_info.txt

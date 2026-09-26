@@ -36,6 +36,7 @@ var _last_tap_time := -10.0
 var _bomb_mark_pos := Vector2.ZERO  # brief ring where a bomb was ordered
 var _bomb_mark := 0.0
 var _canvas: Control
+var _build := ""  # stamp from res://build_info.txt (tools/build_android.py), to tell builds apart
 
 static func wanted() -> bool:
 	return DisplayServer.is_touchscreen_available() or OS.has_feature("mobile") \
@@ -51,6 +52,8 @@ func _ready() -> void:
 	_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_canvas.draw.connect(_draw_controls)
 	add_child(_canvas)
+	if FileAccess.file_exists("res://build_info.txt"):
+		_build = "build " + FileAccess.get_file_as_string("res://build_info.txt").strip_edges()
 
 func _exit_tree() -> void:
 	active = false
@@ -151,6 +154,9 @@ func _draw_controls() -> void:
 	var font := ThemeDB.fallback_font
 	_canvas.draw_string(font, Vector2(_size().x - 330.0, _size().y - 18.0), "hold a spot: laser    double-tap: bomb",
 		HORIZONTAL_ALIGNMENT_RIGHT, 310.0, 13, Color(1, 1, 1, 0.4))
+
+	if _build != "":
+		_canvas.draw_string(font, Vector2(12.0, _size().y - 10.0), _build, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.3))
 
 	# Pause.
 	var pc := _pause_center()

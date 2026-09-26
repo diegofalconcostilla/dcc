@@ -8,7 +8,7 @@ _2026-09-25._ Floor Survivors runs on Android phones (landscape, arm64, `gl_comp
 python tools/build_android.py --send     # builds build/floor-survivors.apk and sends it to your Telegram
 ```
 
-On the phone, tap the APK in Telegram, then install it. Android asks once to allow "install unknown apps" for
+On the phone, tap the APK in Telegram, then install it over the old one (no need to uninstall). Each build has a stamp such as `0925-1716` in its file name, in the Telegram caption and at the bottom-left of the game, so you can check which build is running. Android asks once to allow "install unknown apps" for
 Telegram. The package is `com.diegogames.floorsurvivors`, so each new build replaces the last one and keeps your settings.
 
 The build reuses the toolchain under `C:\Android` (SDK, JDK 17, debug keystore, Godot 4.7.2 export templates) set up
