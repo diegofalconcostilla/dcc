@@ -2,35 +2,36 @@ extends CanvasLayer
 class_name TouchControls
 
 ## On-screen controls for phones (added by floor.gd only on touchscreens, or
-## with env DCC_TOUCH=1 for testing on a PC):
-##   - left thumb: floating joystick (touch anywhere on the left, drag) -> move
-##   - right thumb: press and HOLD on a spot -> the laser keeps firing from Carl
-##     toward your finger (slide it to follow a target)
+## with env DCC_TOUCH=1 for testing on a PC). Both thumbs work the same way,
+## anywhere on screen; the gesture decides what a touch does:
+##   - drag -> floating joystick where the thumb landed -> move
+##   - press and hold still -> the laser keeps firing from Carl toward the
+##     finger (slide it afterwards to follow a target)
 ##   - double-tap a spot -> bomb lands there
 ##   - pause button (top, right of center): opens the Esc menu
-## Nothing auto-aims: every shot goes where the player points. (A drag-to-aim
-## stick came first; it was hard to use on a phone, 2026-09-25.) Player reads
-## `active` / `move_vector` / `aim_vector` and gets touch_bomb() calls.
-## Godot's mouse-from-touch emulation stays on so the Esc menu's buttons work
-## by tapping; Player ignores the emulated clicks while active.
+## History (2026-09-25): a drag-to-aim laser stick was hard to use; then a
+## left-half joystick made shooting to the left awkward (the thumb was there).
+## Nothing auto-aims. Player reads `active` / `move_vector` / `aim_vector` and
+## gets touch_bomb() calls. Godot's mouse-from-touch emulation stays on so the
+## Esc menu's buttons work by tapping; Player ignores those emulated clicks.
 
 static var active := false
 static var move_vector := Vector2.ZERO
 static var aim_vector := Vector2.ZERO  # unit vector Carl -> held finger, else zero
 
 const JOY_RADIUS := 70.0
-const JOY_ZONE := 0.42          # left share of the screen that starts the joystick
+const DRAG_PX := 20.0           # a touch that moves this far is a joystick
+const HOLD_SEC := 0.12          # a touch held this long without moving is aiming
 const PAUSE_RADIUS := 24.0
 const TOP_DEAD_ZONE := 90.0     # HUD panels live up there; taps pass through
 const DOUBLE_TAP_SEC := 0.35
 const DOUBLE_TAP_PX := 70.0
 
 var player: Player
+## finger index -> {"start": Vector2, "pos": Vector2, "t": float, "mode": "pending"|"joy"|"aim"}
+var _touches := {}
 var _joy_finger := -1
-var _joy_origin := Vector2.ZERO
-var _joy_knob := Vector2.ZERO
 var _aim_finger := -1
-var _aim_pos := Vector2.ZERO        # screen position of the held finger
 var _last_tap_pos := Vector2(-9999, -9999)
 var _last_tap_time := -10.0
 var _bomb_mark_pos := Vector2.ZERO  # brief ring where a bomb was ordered
@@ -60,13 +61,23 @@ func _exit_tree() -> void:
 	move_vector = Vector2.ZERO
 	aim_vector = Vector2.ZERO
 
+func _now() -> float:
+	return Time.get_ticks_msec() / 1000.0
+
 func _process(delta: float) -> void:
 	_bomb_mark = maxf(0.0, _bomb_mark - delta)
 	visible = not get_tree().paused
+	# A touch that stayed still long enough starts aiming.
+	for finger in _touches:
+		var t: Dictionary = _touches[finger]
+		if t.mode == "pending" and _now() - t.t >= HOLD_SEC:
+			_set_mode(finger, "aim")
 	# Re-aim every frame: Carl and the camera move under a finger held still.
+	aim_vector = Vector2.ZERO
 	if _aim_finger != -1 and player != null and is_instance_valid(player):
-		var to_finger := _to_world(_aim_pos) - player.global_position
-		aim_vector = to_finger.normalized() if to_finger.length() > 4.0 else Vector2.ZERO
+		var to_finger := _to_world(_touches[_aim_finger].pos) - player.global_position
+		if to_finger.length() > 4.0:
+			aim_vector = to_finger.normalized()
 	_canvas.queue_redraw()
 
 func _size() -> Vector2:
@@ -78,49 +89,58 @@ func _pause_center() -> Vector2:
 func _to_world(screen_pos: Vector2) -> Vector2:
 	return _canvas.get_viewport().get_canvas_transform().affine_inverse() * screen_pos
 
+func _set_mode(finger: int, mode: String) -> void:
+	_touches[finger].mode = mode
+	if mode == "joy":
+		_joy_finger = finger
+	elif mode == "aim":
+		_aim_finger = finger  # the newest aiming finger wins
+
 func _input(event: InputEvent) -> void:
 	if get_tree().paused or player == null or not is_instance_valid(player):
 		return
 	if event is InputEventScreenTouch:
 		if event.pressed:
 			_on_press(event.index, event.position)
-		elif event.index == _joy_finger:
-			_joy_finger = -1
-			move_vector = Vector2.ZERO
-		elif event.index == _aim_finger:
-			_aim_finger = -1
-			aim_vector = Vector2.ZERO
-	elif event is InputEventScreenDrag:
+		else:
+			_on_release(event.index)
+	elif event is InputEventScreenDrag and _touches.has(event.index):
+		var t: Dictionary = _touches[event.index]
+		t.pos = event.position
+		if t.mode == "pending" and t.pos.distance_to(t.start) >= DRAG_PX:
+			# A second dragging thumb while one already steers: treat it as aiming.
+			_set_mode(event.index, "joy" if _joy_finger == -1 else "aim")
 		if event.index == _joy_finger:
-			var offset: Vector2 = (event.position - _joy_origin).limit_length(JOY_RADIUS)
-			_joy_knob = _joy_origin + offset
-			move_vector = offset / JOY_RADIUS
-		elif event.index == _aim_finger:
-			_aim_pos = event.position
+			move_vector = (t.pos - t.start).limit_length(JOY_RADIUS) / JOY_RADIUS
 
 func _on_press(finger: int, pos: Vector2) -> void:
 	if pos.distance_to(_pause_center()) <= PAUSE_RADIUS * 1.6:
 		_open_pause_menu()
-	elif pos.y < TOP_DEAD_ZONE:
 		return
-	elif pos.x < _size().x * JOY_ZONE:
-		if _joy_finger == -1:
-			_joy_finger = finger
-			_joy_origin = pos
-			_joy_knob = pos
+	if pos.y < TOP_DEAD_ZONE:
+		return
+	var now := _now()
+	if now - _last_tap_time <= DOUBLE_TAP_SEC and pos.distance_to(_last_tap_pos) <= DOUBLE_TAP_PX:
+		player.touch_bomb(_to_world(pos))
+		_bomb_mark_pos = pos
+		_bomb_mark = 0.4
+		_last_tap_time = -10.0  # a third tap starts a new pair
 	else:
-		var now := Time.get_ticks_msec() / 1000.0
-		if now - _last_tap_time <= DOUBLE_TAP_SEC and pos.distance_to(_last_tap_pos) <= DOUBLE_TAP_PX:
-			player.touch_bomb(_to_world(pos))
-			_bomb_mark_pos = pos
-			_bomb_mark = 0.4
-			_last_tap_time = -10.0  # a third tap starts a new pair
-		else:
-			_last_tap_time = now
-			_last_tap_pos = pos
-		if _aim_finger == -1:
-			_aim_finger = finger
-			_aim_pos = pos
+		_last_tap_time = now
+		_last_tap_pos = pos
+	_touches[finger] = {"start": pos, "pos": pos, "t": now, "mode": "pending"}
+
+func _on_release(finger: int) -> void:
+	_touches.erase(finger)
+	if finger == _joy_finger:
+		_joy_finger = -1
+		move_vector = Vector2.ZERO
+	if finger == _aim_finger:
+		_aim_finger = -1
+		# Hand aiming back to another finger still holding, if any.
+		for other in _touches:
+			if _touches[other].mode == "aim":
+				_aim_finger = other
 
 ## PauseMenu listens for ui_cancel (Esc); feed it the same action.
 func _open_pause_menu() -> void:
@@ -131,30 +151,27 @@ func _open_pause_menu() -> void:
 
 func _draw_controls() -> void:
 	var ink := Color(1, 1, 1, 0.55)
-	var faint := Color(1, 1, 1, 0.14)
-	# Joystick: a resting hint when idle, base + knob while held.
-	if _joy_finger == -1:
-		var hint := Vector2(130.0, _size().y - 130.0)
-		_canvas.draw_arc(hint, JOY_RADIUS, 0.0, TAU, 48, faint, 2.0)
-		_canvas.draw_circle(hint, 22.0, faint)
-	else:
-		_canvas.draw_circle(_joy_origin, JOY_RADIUS, Color(0, 0, 0, 0.25))
-		_canvas.draw_arc(_joy_origin, JOY_RADIUS, 0.0, TAU, 48, ink, 2.0)
-		_canvas.draw_circle(_joy_knob, 26.0, Color(UIStyle.GOLD, 0.7))
+	# Joystick base + knob while a thumb is steering.
+	if _joy_finger != -1:
+		var t: Dictionary = _touches[_joy_finger]
+		var knob: Vector2 = t.start + (t.pos - t.start).limit_length(JOY_RADIUS)
+		_canvas.draw_circle(t.start, JOY_RADIUS, Color(0, 0, 0, 0.25))
+		_canvas.draw_arc(t.start, JOY_RADIUS, 0.0, TAU, 48, ink, 2.0)
+		_canvas.draw_circle(knob, 26.0, Color(UIStyle.GOLD, 0.7))
 
 	# Held aim point: a crosshair ring big enough to show around the fingertip.
 	if _aim_finger != -1:
+		var at: Vector2 = _touches[_aim_finger].pos
 		var ready := player != null and is_instance_valid(player) and player.get_laser_cooldown_fraction() <= 0.0
-		_canvas.draw_arc(_aim_pos, 38.0, 0.0, TAU, 40, Color(UIStyle.CYAN, 0.85 if ready else 0.45), 2.5)
+		_canvas.draw_arc(at, 38.0, 0.0, TAU, 40, Color(UIStyle.CYAN, 0.85 if ready else 0.45), 2.5)
 		for dir in [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]:
-			_canvas.draw_line(_aim_pos + dir * 30.0, _aim_pos + dir * 46.0, Color(UIStyle.CYAN, 0.85), 2.5)
+			_canvas.draw_line(at + dir * 30.0, at + dir * 46.0, Color(UIStyle.CYAN, 0.85), 2.5)
 	if _bomb_mark > 0.0:
 		_canvas.draw_arc(_bomb_mark_pos, 30.0 + (0.4 - _bomb_mark) * 60.0, 0.0, TAU, 40, Color(UIStyle.AMBER, _bomb_mark * 2.0), 3.0)
 
 	var font := ThemeDB.fallback_font
-	_canvas.draw_string(font, Vector2(_size().x - 330.0, _size().y - 18.0), "hold a spot: laser    double-tap: bomb",
-		HORIZONTAL_ALIGNMENT_RIGHT, 310.0, 13, Color(1, 1, 1, 0.4))
-
+	_canvas.draw_string(font, Vector2(_size().x - 400.0, _size().y - 18.0), "drag: move    hold still: laser    double-tap: bomb",
+		HORIZONTAL_ALIGNMENT_RIGHT, 380.0, 13, Color(1, 1, 1, 0.4))
 	if _build != "":
 		_canvas.draw_string(font, Vector2(12.0, _size().y - 10.0), _build, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.3))
 
