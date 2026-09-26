@@ -19,11 +19,11 @@ for `game-idea-pipeline`. The debug keystore is fine for your own phone, not for
 | Thumb | Gesture | Does |
 |---|---|---|
 | Left | touch and drag anywhere on the left side | move (analog joystick) |
-| Right | drag | aim and fire the laser that way, repeatedly while held |
-| Right | quick tap | bomb lands on the tapped spot |
+| Right | press and hold on a spot | the laser keeps firing from Carl toward your finger; slide to follow a target |
+| Right | double-tap a spot | bomb lands there |
 | Either | pause button, top of the screen | Esc menu (settings, restart, quit) |
 
-On the run-over card, tap to try again. There is no auto-aim and no passive attack: every hit is one you fire
+On the run-over card, tap to try again. (The first version used a drag-to-aim stick for the laser; it was hard to use on a phone, so it became point-and-hold.) There is no auto-aim and no passive attack: every hit is one you fire
 (on PC too: hold right-click to keep firing the laser). Level-up and loot bonuses that fed the old auto-attack
 (damage, cooldown, range, crit) now power the laser, whose base cooldown dropped from 0.5 s to 0.35 s to make up for it.
 

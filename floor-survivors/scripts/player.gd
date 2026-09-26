@@ -111,7 +111,7 @@ func touch_bomb(world_point: Vector2) -> void:
 	_throw_bomb(world_point)
 
 ## Where Carl "looks" (sprite facing, aim tick, bomb reticle), in local
-## coords: the cursor with a mouse; on touch, the aim stick, else the way he's moving.
+## coords: the cursor with a mouse; on touch, the held finger, else the way he's moving.
 func _aim_local() -> Vector2:
 	if not TouchControls.active:
 		return get_local_mouse_position()
@@ -137,7 +137,7 @@ func _handle_movement(delta: float) -> void:
 		_last_move_dir = velocity.normalized()
 	floor_distance_moved += velocity.length() * delta
 
-## Held fire: right mouse button on PC, the right-thumb aim stick on touch.
+## Held fire: right mouse button on PC; on touch, a finger held on the spot to shoot at.
 ## There is no passive attack (removed 2026-09-25 at Diego's request): every
 ## hit is one the player fires. Level-up and loot bonuses that used to feed the
 ## auto-attack (damage, cooldown, range, crit) now feed the laser.

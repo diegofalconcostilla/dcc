@@ -218,12 +218,12 @@ func _build_bottom(root: Control) -> void:
 	col.add_child(slots)
 	_slot_bomb = AbilitySlot.new()
 	_slot_bomb.kind = "bomb"
-	_slot_bomb.key_text = "TAP" if TouchControls.wanted() else "LMB"
+	_slot_bomb.key_text = "2xTAP" if TouchControls.wanted() else "LMB"
 	_slot_bomb.accent = UIStyle.AMBER
 	slots.add_child(_slot_bomb)
 	_slot_laser = AbilitySlot.new()
 	_slot_laser.kind = "laser"
-	_slot_laser.key_text = "DRAG" if TouchControls.wanted() else "RMB"
+	_slot_laser.key_text = "HOLD" if TouchControls.wanted() else "RMB"
 	_slot_laser.accent = UIStyle.CYAN
 	slots.add_child(_slot_laser)
 

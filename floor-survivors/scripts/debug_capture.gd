@@ -11,7 +11,7 @@ class_name DebugCapture
 ##
 ## Actions: shot:name | close:N (spawn N enemies near the player) | boss |
 ## bomb:dx,dy | laser:dx,dy | hp:N | xp:N | end (expire the floor) | die | quit
-## | floor:N (jump to floor N) | god:N (keep HP >= N) | tactic:name | toast:kind | runover | pressr (simulate the restart key) | fx (dump a sample of every effect type) | esc (simulate the Esc key) | settings (open the menu's settings page) | restart (floor.restart_run(), e.g. mid-request) | menurestart (the menu's Restart button) | state (print paused/floor_active/menu) | llm:on/off. Timings are wall-clock seconds
+## | floor:N (jump to floor N) | god:N (keep HP >= N) | tactic:name | toast:kind | runover | pressr (simulate the restart key) | fx (dump a sample of every effect type) | esc (simulate the Esc key) | settings (open the menu's settings page) | restart (floor.restart_run(), e.g. mid-request) | menurestart (the menu's Restart button) | state (print paused/floor_active/menu) | llm:on/off | tdown:x,y / tup:x,y / tdtap:x,y (simulated touch, viewport coords; needs DCC_TOUCH=1) | stats (print Carl's bomb/laser counts). Timings are wall-clock seconds
 ## since the floor started; the node ignores pause so it can shoot the
 ## end-of-floor screens too.
 
@@ -59,6 +59,19 @@ func _run(action: String, arg: String) -> void:
 			var boss := get_tree().get_first_node_in_group("bosses") as Node2D
 			if boss:
 				boss.global_position = player.global_position + Vector2(170, -90)
+		"tdown", "tup", "tdtap":
+			# Simulated touches (viewport coords "x,y", finger 1), for TouchControls.
+			# parse_input_event wants window coords; the plan speaks viewport coords.
+			var at := get_viewport().get_final_transform() * _vec(arg)
+			var presses: Array = [true] if action == "tdown" else ([false] if action == "tup" else [true, false, true, false])
+			for pressed in presses:
+				var touch := InputEventScreenTouch.new()
+				touch.index = 1
+				touch.position = at
+				touch.pressed = pressed
+				Input.parse_input_event(touch)
+		"stats":
+			print("[capture] stats: bombs=%d lasers=%d" % [player.floor_bombs_thrown, player.floor_missiles_cast])
 		"bomb":
 			var offset := _vec(arg)
 			var bomb := Bomb.new()
